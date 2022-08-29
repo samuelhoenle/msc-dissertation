@@ -1,0 +1,456 @@
+{
+  "name": "MSc Survey",
+  "introduction": {
+    "name": "introduction",
+    "body": "[Cover picture]\nDu kennst die besten Wege durch dein Grätzl und weißt, wie du in Wien am besten mit dem Rad von A nach B kommst. Aber nicht alle fahren gleich. Deshalb würden wir gerne mehr über dich erfahren. Damit können wir herausfinden, welche Radwege besonders gut bei welchen Wiener Radler*innen ankommen. Dieses Wissen kann helfen, mehr gute Radinfrastruktur zu bauen.\n\nAls Dank für deine Teilnahme bekommst du Bike Citizens Premium für 3 Monate gratis.\n\nBitte nimm teil, wenn du in den letzten 5 Jahren in Wien mit dem Rad gefahren und über 18 bist. Das Ausfüllen sollte in etwa 5-10 Minuten in Anspruch nehmen.\n\nDie Studie wird unabhängig im Rahmen einer Masterarbeit durchgeführt. Mit deiner Zustimmung verbinden wir deine in Bike Citizens gespeicherten Fahrten in Wien im genannten Zeitraum mit deiner Antwort. Die Fahrten und Antworten aller Teilnehmenden werden gemeinsam analysiert. Deine Antwort wird ausschließlich für diese Studie verwendet. Du bleibst anonym.\n\nVielen Dank für deine Teilnahme! Deine gratis 3 Monate Premium beginnen, sobald du die Umfrage abgeschlossen hast.\nStudie im Rahmen einer Masterarbeit an der University of Glasgow, durchgeführt von Samuel Hönle (2709806H@student.gla.ac.uk)\n\n[Link to DE Erklärung in einfacher Sprache.pdf][Link to DE Datenschutzerklärung.pdf][Link to EN Plain Language Statement.pdf][Link to EN Privacy Notice.pdf]",
+    "service_name": null
+  },
+  "after_survey_content": {
+    "name": "after_survey_content",
+    "body": "Vielen Dank, dass du an dieser Studie teilnimmst!\n\nDurch deine Hilfe können wir untersuchen, welche Radwege besonders gut bei welchen Wiener Radler*innen ankommen. Dieses Wissen kann helfen, mehr gute Radinfrastruktur zu bauen.\n\nDeine 3 Monate gratis Premium beginnen an dem Tag, an dem du die Umfrage ausgefüllt hast.\n\nHier findest du noch einmal alle wichtigen Dokumente zu dieser Studie:\n[Link to DE Erklärung in einfacher Sprache.pdf][Link to DE Datenschutzerklärung.pdf][Link to EN Plain Language Statement.pdf][Link to EN Privacy Notice.pdf]",
+    "service_name": null
+  },
+  "display_title": "Wem nützt welcher Radweg?",
+  "start_date": "2017-07-01T00:00:00.000+02:00",
+  "end_date": "2022-06-30T23:59:00.000+02:00",
+  "geographical_place": "Wien",
+  "questions": [
+    {
+      "question_text": "In welchem Jahr wurdest du geboren?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 1,
+      "answer_options": "",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "1910",
+        "less_than_or_equal_to": "2004"
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Was ist deine Postleitzahl?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 2,
+      "answer_options": "",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "1000",
+        "less_than_or_equal_to": "9999"
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Was ist dein Geschlecht?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 3,
+      "answer_options": "männlich\r\nweiblich\r\nanderes",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Was ist dein höchster Schulabschluss?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 4,
+      "answer_options": "(noch) kein Abschluss\r\nVolks-/Hauptschule ohne Lehre\r\nVolks-/Hauptschule mit Lehre/Fachschule\r\nMatura\r\nUniversität/(Fach)Hochschule\r\nweiß nicht",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Bist du verheiratet?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 5,
+      "answer_options": "Nicht verheiratet\r\nVerheiratet/Eingetragene Partnerschaft\r\nGetrennt\r\nGeschieden\r\nVerwitwet",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Welche Beschreibung trifft am besten auf deine derzeitige Wohnsituation zu? Ich wohne…",
+      "default_text": "",
+      "placeholder": "",
+      "position": 6,
+      "answer_options": "alleine\r\nalleine mit Kindern\r\nmit Partner*in und Kindern\r\nmit Partner*in ohne Kinder oder mit erwachsenen Kindern\r\nmit Kindern und anderen Personen (alleine oder mit Partner*in)\r\nanders",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wie viele Kleinkinder (0-4 Jahre) leben in deinem Haushalt?",
+      "default_text": "0",
+      "placeholder": "0",
+      "position": 7,
+      "answer_options": "",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "0",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wie viele Kinder und junge Erwachsene (5-24 Jahre) leben in deinem Haushalt?",
+      "default_text": "0",
+      "placeholder": "",
+      "position": 8,
+      "answer_options": "",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "0",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wie viele Erwachsene (25-64 Jahre) leben in deinem Haushalt?",
+      "default_text": "0",
+      "placeholder": "",
+      "position": 9,
+      "answer_options": "",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "0",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wie viele ältere Erwachsene (65+ Jahre) leben in deinem Haushalt?",
+      "default_text": "0",
+      "placeholder": "",
+      "position": 10,
+      "answer_options": "",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "0",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wie viele Personen zwischen 16-64 Jahre in deinem Haushalt arbeiten?",
+      "default_text": "0",
+      "placeholder": "",
+      "position": 11,
+      "answer_options": "",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "0",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wie würdest du deine derzeitige Arbeitssituation beschreiben?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 12,
+      "answer_options": "Angestellt – Vollzeit\r\nAngestellt – Teilzeit\r\nSelbstständig\r\nin Ausbildung\r\nausschließlich im Haushalt tätig\r\nin Karenz\r\nArbeitslos\r\nim Ruhestand\r\ndauerhaft arbeitsunfähig\r\nim Militär-/Zivildienst\r\nanders",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wie hoch ist dein persönliches Monats-Nettoeinkommen?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 13,
+      "answer_options": "≤ € 250\r\n€ 251 - € 1000\r\n€ 1001 - € 1900\r\n€ 1901 - € 2700\r\n€ 2701 - € 3700\r\n\u003e € 3700",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "Bitte zähle alle Einkommensarten, über die du persönlich verfügst, zusammen. Falls dein Einkommen variiert oder du nicht sicher bist, bitte gib den Durchschnitt oder deine beste Schätzung an.",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wie hoch ist das Monats-Nettoeinkommen deines gesamten Haushalts?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 14,
+      "answer_options": "≤ € 1300\r\n€ 1301 - € 2000\r\n€ 2001 - € 3300\r\n€ 3301 - € 4900\r\n€ 4901 - € 6800\r\n\u003e € 6800",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "Bitte zähle alle Einkommensarten aller Personen in deinem Haushalt zusammen. Falls das Einkommen variiert oder du nicht sicher bist, bitte gib den Durchschnitt oder deine beste Schätzung an.",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Stehen dir diese Dinge an deinem Arbeitsplatz zur Verfügung?",
+      "default_text": null,
+      "placeholder": "",
+      "position": 15,
+      "answer_options": "flexible Arbeitszeiten\r\nMöglichkeit zum Home-Office",
+      "validation_rules": {
+        "presence": "0",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Welche Staatsbürgerschaft hast du?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 16,
+      "answer_options": "Österreich\r\nAbchasien\r\nAfghanistan\r\nÄgypten\r\nAlbanien\r\nAlgerien\r\nAndorra\r\nAngola\r\nAntigua und Barbuda\r\nÄquatorialguinea\r\nArgentinien\r\nArmenien\r\nArzach\r\nAserbaidschan\r\nÄthiopien\r\nAustralien\r\nBahamas\r\nBahrain\r\nBangladesch\r\nBarbados\r\nBelgien\r\nBelize\r\nBenin\r\nBhutan\r\nBolivien\r\nBosnien und Herzegowina\r\nBotswana\r\nBrasilien\r\nBrunei\r\nBulgarien\r\nBurkina Faso\r\nBurundi\r\nChile\r\nRepublik China\r\nVolksrepublik China mit Hongkong (HK) und Macau (MO)\r\nCookinseln\r\nCosta Rica\r\nDänemark mit Färöäer (FO) und Grönland (GL)\r\nDeutschland\r\nDominica\r\nDominikanische Republik\r\nDschibuti\r\nEcuador\r\nEl Salvador\r\nElfenbeinküste\r\nEritrea\r\nEstland\r\nEswatini\r\nFidschi\r\nFinnland\r\nFrankreich\r\nGabun\r\nGambia\r\nGeorgien\r\nGhana\r\nGrenada\r\nGriechenland\r\nGuatemala\r\nGuinea\r\nGuinea-Bissau\r\nGuyana\r\nHaiti\r\nHonduras\r\nIndien\r\nIndonesien\r\nIrak\r\nIran\r\nIrland\r\nIsland\r\nIsrael\r\nItalien\r\nJamaika\r\nJapan\r\nJemen\r\nJordanien\r\nKambodscha\r\nKamerun\r\nKanada\r\nKap Verde\r\nKasachstan\r\nKatar\r\nKenia\r\nKirgisistan\r\nKiribati\r\nKolumbien\r\nKomoren\r\nKongo; Demokratische Republik\r\nKongo; Republik\r\nNordkorea\r\nSüdkorea\r\nKosovo\r\nKroatien\r\nKuba\r\nKuwait\r\nLaos\r\nLesotho\r\nLettland\r\nLibanon\r\nLiberia\r\nLibyen\r\nLiechtenstein\r\nLitauen\r\nLuxemburg\r\nMadagaskar\r\nMalawi\r\nMalaysia\r\nMalediven\r\nMali\r\nMalta\r\nMarokko ohne Westsahara (EH)\r\nMarshallinseln\r\nMauretanien\r\nMauritius\r\nMexiko\r\nMikronesien\r\nMoldau\r\nMonaco\r\nMongolei\r\nMontenegro\r\nMosambik\r\nMyanmar\r\nNamibia\r\nNauru\r\nNepal\r\nNeuseeland\r\nNicaragua\r\nNiederlande\r\nNiger\r\nNigeria\r\nNiue\r\nNordmazedonien\r\nNordzypern\r\nNorwegen\r\nOman\r\nOsttimor / Timor-Leste\r\nPakistan\r\nPalästina\r\nPalau\r\nPanama\r\nPapua-Neuguinea\r\nParaguay\r\nPeru\r\nPhilippinen\r\nPolen\r\nPortugal\r\nRuanda\r\nRumänien\r\nRussland\r\nSalomonen\r\nSambia\r\nSamoa\r\nSan Marino\r\nSão Tomé und Príncipe\r\nSaudi-Arabien\r\nSchweden\r\nSchweiz\r\nSenegal\r\nSerbien\r\nSeychellen\r\nSierra Leone\r\nSimbabwe\r\nSingapur\r\nSlowakei\r\nSlowenien\r\nSomalia\r\nSomaliland\r\nSpanien\r\nSri Lanka\r\nSt. Kitts und Nevis\r\nSt. Lucia\r\nSt. Vincent und die Grenadinen\r\nSüdafrika\r\nSudan\r\nSüdossetien\r\nSüdsudan\r\nSuriname\r\nSyrien\r\nTadschikistan\r\nTansania\r\nThailand\r\nTogo\r\nTonga\r\nTransnistrien\r\nTrinidad und Tobago\r\nTschad\r\nTschechien\r\nTunesien\r\nTürkei\r\nTurkmenistan\r\nTuvalu\r\nUganda\r\nUkraine\r\nUngarn\r\nUruguay\r\nUsbekistan\r\nVanuatu\r\nVatikanstadt\r\nVenezuela\r\nVereinigte Arabische Emirate\r\nVereinigte Staaten von Amerika\r\nVereinigtes Königreich\r\nVietnam\r\nWeißrussland\r\nWestsahara\r\nZentralafrikanische Republik\r\nZypern\r\nStaatenlos\r\nandere\r\nkeine Antwort",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "Falls du mehr als eine Staatsbürgerschaft hast: Welche davon siehst du als deine primäre Staatsbürgerschaft an? Optionen für 'Staatenlos', 'andere', 'keine Antwort' findest du ganz unten in der Liste.",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wo wurdest du geboren?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 17,
+      "answer_options": "Österreich\r\nAbchasien\r\nAfghanistan\r\nÄgypten\r\nAlbanien\r\nAlgerien\r\nAndorra\r\nAngola\r\nAntigua und Barbuda\r\nÄquatorialguinea\r\nArgentinien\r\nArmenien\r\nArzach\r\nAserbaidschan\r\nÄthiopien\r\nAustralien\r\nBahamas\r\nBahrain\r\nBangladesch\r\nBarbados\r\nBelgien\r\nBelize\r\nBenin\r\nBhutan\r\nBolivien\r\nBosnien und Herzegowina\r\nBotswana\r\nBrasilien\r\nBrunei\r\nBulgarien\r\nBurkina Faso\r\nBurundi\r\nChile\r\nRepublik China\r\nVolksrepublik China mit Hongkong (HK) und Macau (MO)\r\nCookinseln\r\nCosta Rica\r\nDänemark mit Färöäer (FO) und Grönland (GL)\r\nDeutschland\r\nDominica\r\nDominikanische Republik\r\nDschibuti\r\nEcuador\r\nEl Salvador\r\nElfenbeinküste\r\nEritrea\r\nEstland\r\nEswatini\r\nFidschi\r\nFinnland\r\nFrankreich\r\nGabun\r\nGambia\r\nGeorgien\r\nGhana\r\nGrenada\r\nGriechenland\r\nGuatemala\r\nGuinea\r\nGuinea-Bissau\r\nGuyana\r\nHaiti\r\nHonduras\r\nIndien\r\nIndonesien\r\nIrak\r\nIran\r\nIrland\r\nIsland\r\nIsrael\r\nItalien\r\nJamaika\r\nJapan\r\nJemen\r\nJordanien\r\nKambodscha\r\nKamerun\r\nKanada\r\nKap Verde\r\nKasachstan\r\nKatar\r\nKenia\r\nKirgisistan\r\nKiribati\r\nKolumbien\r\nKomoren\r\nKongo; Demokratische Republik\r\nKongo; Republik\r\nNordkorea\r\nSüdkorea\r\nKosovo\r\nKroatien\r\nKuba\r\nKuwait\r\nLaos\r\nLesotho\r\nLettland\r\nLibanon\r\nLiberia\r\nLibyen\r\nLiechtenstein\r\nLitauen\r\nLuxemburg\r\nMadagaskar\r\nMalawi\r\nMalaysia\r\nMalediven\r\nMali\r\nMalta\r\nMarokko ohne Westsahara (EH)\r\nMarshallinseln\r\nMauretanien\r\nMauritius\r\nMexiko\r\nMikronesien\r\nMoldau\r\nMonaco\r\nMongolei\r\nMontenegro\r\nMosambik\r\nMyanmar\r\nNamibia\r\nNauru\r\nNepal\r\nNeuseeland\r\nNicaragua\r\nNiederlande\r\nNiger\r\nNigeria\r\nNiue\r\nNordmazedonien\r\nNordzypern\r\nNorwegen\r\nOman\r\nOsttimor / Timor-Leste\r\nPakistan\r\nPalästina\r\nPalau\r\nPanama\r\nPapua-Neuguinea\r\nParaguay\r\nPeru\r\nPhilippinen\r\nPolen\r\nPortugal\r\nRuanda\r\nRumänien\r\nRussland\r\nSalomonen\r\nSambia\r\nSamoa\r\nSan Marino\r\nSão Tomé und Príncipe\r\nSaudi-Arabien\r\nSchweden\r\nSchweiz\r\nSenegal\r\nSerbien\r\nSeychellen\r\nSierra Leone\r\nSimbabwe\r\nSingapur\r\nSlowakei\r\nSlowenien\r\nSomalia\r\nSomaliland\r\nSpanien\r\nSri Lanka\r\nSt. Kitts und Nevis\r\nSt. Lucia\r\nSt. Vincent und die Grenadinen\r\nSüdafrika\r\nSudan\r\nSüdossetien\r\nSüdsudan\r\nSuriname\r\nSyrien\r\nTadschikistan\r\nTansania\r\nThailand\r\nTogo\r\nTonga\r\nTransnistrien\r\nTrinidad und Tobago\r\nTschad\r\nTschechien\r\nTunesien\r\nTürkei\r\nTurkmenistan\r\nTuvalu\r\nUganda\r\nUkraine\r\nUngarn\r\nUruguay\r\nUsbekistan\r\nVanuatu\r\nVatikanstadt\r\nVenezuela\r\nVereinigte Arabische Emirate\r\nVereinigte Staaten von Amerika\r\nVereinigtes Königreich\r\nVietnam\r\nWeißrussland\r\nWestsahara\r\nZentralafrikanische Republik\r\nZypern\r\nStaatenlos\r\nanderes\r\nweiß nicht\r\nkeine Antwort",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "Bitte gib das Land an, in dem der Ort heute liegt. Optionen für 'anderes', 'weiß nicht', 'keine Antwort' findest du ganz unten in der Liste.",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wo wurde dein Elternteil 1 geboren?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 18,
+      "answer_options": "Österreich\r\nAbchasien\r\nAfghanistan\r\nÄgypten\r\nAlbanien\r\nAlgerien\r\nAndorra\r\nAngola\r\nAntigua und Barbuda\r\nÄquatorialguinea\r\nArgentinien\r\nArmenien\r\nArzach\r\nAserbaidschan\r\nÄthiopien\r\nAustralien\r\nBahamas\r\nBahrain\r\nBangladesch\r\nBarbados\r\nBelgien\r\nBelize\r\nBenin\r\nBhutan\r\nBolivien\r\nBosnien und Herzegowina\r\nBotswana\r\nBrasilien\r\nBrunei\r\nBulgarien\r\nBurkina Faso\r\nBurundi\r\nChile\r\nRepublik China\r\nVolksrepublik China mit Hongkong (HK) und Macau (MO)\r\nCookinseln\r\nCosta Rica\r\nDänemark mit Färöäer (FO) und Grönland (GL)\r\nDeutschland\r\nDominica\r\nDominikanische Republik\r\nDschibuti\r\nEcuador\r\nEl Salvador\r\nElfenbeinküste\r\nEritrea\r\nEstland\r\nEswatini\r\nFidschi\r\nFinnland\r\nFrankreich\r\nGabun\r\nGambia\r\nGeorgien\r\nGhana\r\nGrenada\r\nGriechenland\r\nGuatemala\r\nGuinea\r\nGuinea-Bissau\r\nGuyana\r\nHaiti\r\nHonduras\r\nIndien\r\nIndonesien\r\nIrak\r\nIran\r\nIrland\r\nIsland\r\nIsrael\r\nItalien\r\nJamaika\r\nJapan\r\nJemen\r\nJordanien\r\nKambodscha\r\nKamerun\r\nKanada\r\nKap Verde\r\nKasachstan\r\nKatar\r\nKenia\r\nKirgisistan\r\nKiribati\r\nKolumbien\r\nKomoren\r\nKongo; Demokratische Republik\r\nKongo; Republik\r\nNordkorea\r\nSüdkorea\r\nKosovo\r\nKroatien\r\nKuba\r\nKuwait\r\nLaos\r\nLesotho\r\nLettland\r\nLibanon\r\nLiberia\r\nLibyen\r\nLiechtenstein\r\nLitauen\r\nLuxemburg\r\nMadagaskar\r\nMalawi\r\nMalaysia\r\nMalediven\r\nMali\r\nMalta\r\nMarokko ohne Westsahara (EH)\r\nMarshallinseln\r\nMauretanien\r\nMauritius\r\nMexiko\r\nMikronesien\r\nMoldau\r\nMonaco\r\nMongolei\r\nMontenegro\r\nMosambik\r\nMyanmar\r\nNamibia\r\nNauru\r\nNepal\r\nNeuseeland\r\nNicaragua\r\nNiederlande\r\nNiger\r\nNigeria\r\nNiue\r\nNordmazedonien\r\nNordzypern\r\nNorwegen\r\nOman\r\nOsttimor / Timor-Leste\r\nPakistan\r\nPalästina\r\nPalau\r\nPanama\r\nPapua-Neuguinea\r\nParaguay\r\nPeru\r\nPhilippinen\r\nPolen\r\nPortugal\r\nRuanda\r\nRumänien\r\nRussland\r\nSalomonen\r\nSambia\r\nSamoa\r\nSan Marino\r\nSão Tomé und Príncipe\r\nSaudi-Arabien\r\nSchweden\r\nSchweiz\r\nSenegal\r\nSerbien\r\nSeychellen\r\nSierra Leone\r\nSimbabwe\r\nSingapur\r\nSlowakei\r\nSlowenien\r\nSomalia\r\nSomaliland\r\nSpanien\r\nSri Lanka\r\nSt. Kitts und Nevis\r\nSt. Lucia\r\nSt. Vincent und die Grenadinen\r\nSüdafrika\r\nSudan\r\nSüdossetien\r\nSüdsudan\r\nSuriname\r\nSyrien\r\nTadschikistan\r\nTansania\r\nThailand\r\nTogo\r\nTonga\r\nTransnistrien\r\nTrinidad und Tobago\r\nTschad\r\nTschechien\r\nTunesien\r\nTürkei\r\nTurkmenistan\r\nTuvalu\r\nUganda\r\nUkraine\r\nUngarn\r\nUruguay\r\nUsbekistan\r\nVanuatu\r\nVatikanstadt\r\nVenezuela\r\nVereinigte Arabische Emirate\r\nVereinigte Staaten von Amerika\r\nVereinigtes Königreich\r\nVietnam\r\nWeißrussland\r\nWestsahara\r\nZentralafrikanische Republik\r\nZypern\r\nStaatenlos\r\nanderes\r\nweiß nicht\r\nkeine Antwort",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "Gemeint sind deine leiblichen Eltern. Bitte gib das Land an, in dem der Ort heute liegt. Optionen für 'anderes', 'weiß nicht', 'keine Antwort' findest du ganz unten in der Liste.",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wo wurde dein Elternteil 2 geboren?",
+      "default_text": "",
+      "placeholder": "",
+      "position": 19,
+      "answer_options": "Österreich\r\nAbchasien\r\nAfghanistan\r\nÄgypten\r\nAlbanien\r\nAlgerien\r\nAndorra\r\nAngola\r\nAntigua und Barbuda\r\nÄquatorialguinea\r\nArgentinien\r\nArmenien\r\nArzach\r\nAserbaidschan\r\nÄthiopien\r\nAustralien\r\nBahamas\r\nBahrain\r\nBangladesch\r\nBarbados\r\nBelgien\r\nBelize\r\nBenin\r\nBhutan\r\nBolivien\r\nBosnien und Herzegowina\r\nBotswana\r\nBrasilien\r\nBrunei\r\nBulgarien\r\nBurkina Faso\r\nBurundi\r\nChile\r\nRepublik China\r\nVolksrepublik China mit Hongkong (HK) und Macau (MO)\r\nCookinseln\r\nCosta Rica\r\nDänemark mit Färöäer (FO) und Grönland (GL)\r\nDeutschland\r\nDominica\r\nDominikanische Republik\r\nDschibuti\r\nEcuador\r\nEl Salvador\r\nElfenbeinküste\r\nEritrea\r\nEstland\r\nEswatini\r\nFidschi\r\nFinnland\r\nFrankreich\r\nGabun\r\nGambia\r\nGeorgien\r\nGhana\r\nGrenada\r\nGriechenland\r\nGuatemala\r\nGuinea\r\nGuinea-Bissau\r\nGuyana\r\nHaiti\r\nHonduras\r\nIndien\r\nIndonesien\r\nIrak\r\nIran\r\nIrland\r\nIsland\r\nIsrael\r\nItalien\r\nJamaika\r\nJapan\r\nJemen\r\nJordanien\r\nKambodscha\r\nKamerun\r\nKanada\r\nKap Verde\r\nKasachstan\r\nKatar\r\nKenia\r\nKirgisistan\r\nKiribati\r\nKolumbien\r\nKomoren\r\nKongo; Demokratische Republik\r\nKongo; Republik\r\nNordkorea\r\nSüdkorea\r\nKosovo\r\nKroatien\r\nKuba\r\nKuwait\r\nLaos\r\nLesotho\r\nLettland\r\nLibanon\r\nLiberia\r\nLibyen\r\nLiechtenstein\r\nLitauen\r\nLuxemburg\r\nMadagaskar\r\nMalawi\r\nMalaysia\r\nMalediven\r\nMali\r\nMalta\r\nMarokko ohne Westsahara (EH)\r\nMarshallinseln\r\nMauretanien\r\nMauritius\r\nMexiko\r\nMikronesien\r\nMoldau\r\nMonaco\r\nMongolei\r\nMontenegro\r\nMosambik\r\nMyanmar\r\nNamibia\r\nNauru\r\nNepal\r\nNeuseeland\r\nNicaragua\r\nNiederlande\r\nNiger\r\nNigeria\r\nNiue\r\nNordmazedonien\r\nNordzypern\r\nNorwegen\r\nOman\r\nOsttimor / Timor-Leste\r\nPakistan\r\nPalästina\r\nPalau\r\nPanama\r\nPapua-Neuguinea\r\nParaguay\r\nPeru\r\nPhilippinen\r\nPolen\r\nPortugal\r\nRuanda\r\nRumänien\r\nRussland\r\nSalomonen\r\nSambia\r\nSamoa\r\nSan Marino\r\nSão Tomé und Príncipe\r\nSaudi-Arabien\r\nSchweden\r\nSchweiz\r\nSenegal\r\nSerbien\r\nSeychellen\r\nSierra Leone\r\nSimbabwe\r\nSingapur\r\nSlowakei\r\nSlowenien\r\nSomalia\r\nSomaliland\r\nSpanien\r\nSri Lanka\r\nSt. Kitts und Nevis\r\nSt. Lucia\r\nSt. Vincent und die Grenadinen\r\nSüdafrika\r\nSudan\r\nSüdossetien\r\nSüdsudan\r\nSuriname\r\nSyrien\r\nTadschikistan\r\nTansania\r\nThailand\r\nTogo\r\nTonga\r\nTransnistrien\r\nTrinidad und Tobago\r\nTschad\r\nTschechien\r\nTunesien\r\nTürkei\r\nTurkmenistan\r\nTuvalu\r\nUganda\r\nUkraine\r\nUngarn\r\nUruguay\r\nUsbekistan\r\nVanuatu\r\nVatikanstadt\r\nVenezuela\r\nVereinigte Arabische Emirate\r\nVereinigte Staaten von Amerika\r\nVereinigtes Königreich\r\nVietnam\r\nWeißrussland\r\nWestsahara\r\nZentralafrikanische Republik\r\nZypern\r\nStaatenlos\r\nanderes\r\nweiß nicht\r\nkeine Antwort",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "Gemeint sind deine leiblichen Eltern. Bitte gib das Land an, in dem der Ort heute liegt. Optionen für 'anderes', 'weiß nicht', 'keine Antwort' findest du ganz unten in der Liste.",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Welche Verkehrsmittel stehen dir üblicherweise zur Verfügung?",
+      "default_text": null,
+      "placeholder": "",
+      "position": 20,
+      "answer_options": "Öffentliche Verkehrsmittel\r\nFahrrad\r\nE-Bike\r\nFahrrad-Sharing-Dienst\r\nAuto\r\nCar-Sharing-Dienst\r\nMotorrad\r\nMotorrad-Sharing-Dienst\r\nE-Scooter\r\nE-Scooter-Sharing-Dienst",
+      "validation_rules": {
+        "presence": "0",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "\"Üblicherweise\" heißt, du hast Zugang zu diesem Verkehrsmittel durch Eigentum, regelmäßige Mitverwendung, Besitz einer Jahreskarte, bestehender Account, …",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Wie viele funktionierende Fahrräder gibt es in deinem Haushalt?",
+      "default_text": "0",
+      "placeholder": "",
+      "position": 21,
+      "answer_options": "",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "0",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "inklusive E-Bikes",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Für welche Verkehrsmittel benutzt du dein Smartphone?",
+      "default_text": null,
+      "placeholder": "",
+      "position": 22,
+      "answer_options": "Fahrrad\r\nÖffentlicher Verkehr\r\nzu Fuß\r\nAuto\r\nandere",
+      "validation_rules": {
+        "presence": "0",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "Zum Beispiel um Routen zu suchen, Tickets zu kaufen, etwas zu buchen, oder andere Informationen zu erfahren – entweder vor, während, oder nach deiner Reise.",
+        "service_name": null
+      }
+    },
+    {
+      "question_text": "Einverständnis",
+      "default_text": null,
+      "placeholder": "",
+      "position": 99,
+      "answer_options": "Ich stimme zu",
+      "validation_rules": {
+        "presence": "1",
+        "minimum": "",
+        "maximum": "",
+        "greater_than_or_equal_to": "",
+        "less_than_or_equal_to": ""
+      },
+      "description": {
+        "name": "description",
+        "body": "Ich stimme zu, dass meine Antworten mit meinen in Bike Citizens gespeicherten Fahrten in Wien zwischen dem 1.7.2017 und dem 31.6.2022 verbunden und für die beschriebene Studie gemäß der Datenschutzinformation verwendet werden. Ich bestätige weiters, dass ich mündig und über 18 Jahre alt bin.",
+        "service_name": null
+      }
+    }
+  ]
+}

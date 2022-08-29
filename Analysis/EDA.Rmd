@@ -1,0 +1,1036 @@
+---
+title: 'Dissertation: Exploratory Data Analysis'
+author: "Samuel Hönle"
+date: '2022-08-29'
+output:
+  bookdown::html_document2:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: paper
+    highlight: kate
+    smart: true
+    code_folding: hide
+---
+
+```{r, results='hide'}
+library(tidyverse)
+library(scales)
+library(lubridate)
+library(fs)
+library(sf)
+library(magrittr)
+library(ggpubr)
+library(reporttools)
+
+library(tikzDevice)
+
+source('../helpers/data_preparation.R')
+```
+
+```{r}
+version <- '2022-08-02_20-02-15'
+```
+
+```{r}
+data_path <- read_file('../paths/data-path.txt')
+survey_path <- path(data_path, version, paste(version, '_kyuc-export.csv', sep = ''))
+#tracks_path <- path(data_path, version, 'Vienna_2017-2022_10pc.geojson')
+tracks_path <- path(data_path, version, 'Vienna_2017-2022.geojson')
+data <- prepare_data(survey_path, tracks_path)
+```
+
+```{r, eval=F}
+# necessary for exports
+figures_path <- read_file('../paths/figures-path.txt')
+tables_path <- read_file('../paths/tables-path.txt')
+
+textwidth_pt <- 398.3386
+textwidth_in <- textwidth_pt / 72.27
+
+golden_ratio <- (5**.5 - 1) / 2
+
+# Figure width
+fw <- function(fract){
+  return(textwidth_in*fract)
+}
+# Figure height
+fh <- function(fract){
+  return(fw(fract) * golden_ratio)
+}
+
+options(tikzLatexPackages=c(getOption( "tikzLatexPackages" ),"\\usepackage{amssymb}"))
+
+latex_safe <- function(value){
+  latex_safe_str <- value
+  latex_safe_str <- str_replace_all(latex_safe_str, '≤', '$\\\\leqslant$')
+  return(latex_safe_str)
+}
+latex_safe_labeller <- function(variable,value){
+  return(latex_safe(value))
+}
+```
+
+
+```{r}
+data.frame(t = c('Before', 'After'), Respondents = c(nrow(data$survey_complete), nrow(data$survey)), row.names = 't')
+```
+
+Descriptive statistics for LaTeX: https://cran.r-project.org/web/packages/reporttools/vignettes/reporttools.pdf
+```{r}
+data$survey %>% dplyr::select(-bc_token) %>% Hmisc::describe()
+```
+
+```{r Sumstat respondents, eval=F}
+# Execute to export
+data$survey %>% 
+  select(gender, education, hhtype, worksituation, persinc, hhinc, citizenship_eu, nwparent, homeoffice, flextime, avb_car) %>% 
+  data.frame() %>% 
+  tableNominal(
+    cap = 'Summary statistics of survey responses, all respondents (categorical variables)',
+    lab = 'tab:sumstat_all_cat',
+    caption.placement = 'top',
+    font.size = 'scriptsize'
+  ) %>% 
+  latex_safe() %>% 
+  cat(file = path(tables_path, 'sumstat-all-cat.tex'))
+data$survey %>% 
+  select(age, hhbikes) %>% 
+  data.frame() %>% 
+  tableContinuous(
+    cap = 'Summary statistics of survey responses, all respondents (continuous variables)',
+    lab = 'tab:sumstat_all_cont',
+    longtable = F,
+    caption.placement = 'top',
+    font.size = 'scriptsize'
+  ) %>% 
+  capture.output() %>% 
+  cat(file = path(tables_path, 'sumstat-all-cont.tex'), sep = '\n')
+```
+
+```{r}
+data$tracks %>% st_drop_geometry() %>% dplyr::select(-token, -uuid) %>% Hmisc::describe()
+```
+
+```{r Sumstat answers by tracks, eval=F}
+# Execute to export
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  select(gender, education, hhtype, worksituation, persinc, hhinc, citizenship_eu, nwparent, homeoffice, flextime, avb_car) %>%
+  data.frame() %>% 
+  tableNominal(
+    cap = 'Summary statistics survey responses weighted by tracks (categorical variables)',
+    lab = 'tab:sumstat_all_tracks_cat',
+    caption.placement = 'top',
+    font.size = 'scriptsize'
+  ) %>% 
+  latex_safe() %>% 
+  cat(file = path(tables_path, 'sumstat-all-tracks-cat.tex'))
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  select(age, hhbikes) %>% 
+  data.frame() %>% 
+  tableContinuous(
+    cap = 'Summary statistics survey responses weighted by tracks (continuous variables)',
+    lab = 'tab:sumstat_all_tracks_cont',
+    longtable = F,
+    caption.placement = 'top',
+    font.size = 'scriptsize'
+  ) %>% 
+  capture.output() %>% 
+  cat(file = path(tables_path, 'sumstat-all-tracks-cont.tex'), sep = '\n')
+```
+
+```{r Sumstat track statistics}
+data$tracks %>% st_drop_geometry() %>% summarise(`Total count` = n(),
+                                                 `Total distance (km)` = sum(distance_meters)/1000,
+                                                 `Total duration (hours)` = sum(duration_seconds)/60/60,
+                                                 `Mean distance (km)` = mean(distance_meters)/1000,
+                                                 `Mean duration (minutes)` = mean(duration_seconds)/60
+                                                 ) %>% 
+  mutate(`Mean speed (km/h)` = `Total distance (km)` / `Total duration (hours)`) %>% 
+  dplyr::select(-`Total distance (km)`, -`Total duration (hours)`)# %>% 
+  # Uncomment to export (including pipe)
+  #xtable(type = 'latex',
+  #       caption = 'Summary statistics of tracks',
+  #       label = 'tab:sumstat_tracks'
+  #) %>% 
+  #print(file = path(tables_path, 'sumstat-tracks.tex'),
+  #      caption.placement = 'top',
+  #      size = 'scriptsize',
+  #      #floating.environment = 'sidewaystable'
+  #      )
+```
+
+
+```{r}
+data$survey %>% 
+  ggplot(aes(gender)) +
+  geom_bar()
+```
+
+```{r Figure age histogram}
+# Uncomment to export
+#tikz(path(figures_path, 'age-hist.tex'),
+#     width = fw(.48), height = fh(.48),
+#     pointsize = 8)
+data$survey %>% gghistogram('age', binwidth = 5, xlab = 'Age', add = 'mean')
+#dev.off()
+```
+
+```{r}
+data$survey %>% count(plz)
+
+data$survey %>%
+  filter(plz > 1000 & plz < 2000) %>% 
+  ggplot(aes(plz)) +
+  geom_bar() +
+  scale_x_continuous(breaks=seq(1010, 1230, by=10))
+```
+
+```{r}
+data$survey %>% count(education)
+data$survey %>%
+  ggplot(aes(education)) +
+  geom_bar() +
+  coord_flip()
+```
+
+```{r}
+data$survey %>% count(marstat)
+data$survey %>% 
+  ggplot(aes(marstat)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% count(hhtype)
+data$survey %>% 
+  ggplot(aes(hhtype)) +
+  geom_bar() +
+  coord_flip()
+```
+
+```{r}
+data$survey %>% count(nkids)
+data$survey %>% 
+  ggplot(aes(nkids)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% count(nyouth)
+data$survey %>% 
+  ggplot(aes(nyouth)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% count(nadults)
+data$survey %>% 
+  ggplot(aes(nadults)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% count(nelderly)
+data$survey %>% 
+  ggplot(aes(nelderly)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% count(nwork)
+data$survey %>% 
+  ggplot(aes(nwork)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% count(worksituation)
+data$survey %>% 
+  ggplot(aes(worksituation)) +
+  geom_bar() +
+  coord_flip()
+```
+
+```{r Figure persinc in survey to expected}
+data$survey %>% count(persinc)
+inc_quantiles <- data.frame(
+  persinc = factor(c('≤ € 250', '€ 251 - € 1000', '€ 1001 - € 1900', '€ 1901 - € 2700', '€ 2701 - € 3700', '> € 3700'), ordered = T),
+  hhinc = factor(c('≤ € 1300', '€ 1301 - € 2000', '€ 2001 - € 3300', '€ 3301 - € 4900', '€ 4901 - € 6800', '> € 6800'), ordered = T),
+  share = c(.1, .15, .25, .25, .15, .1)
+)
+# Uncomment to export
+#tikz(path(figures_path, 'persinc-dist.tex'),
+#     width = fw(0.48), height = fh(0.48)*2,
+#     pointsize = 8)
+data$survey %>% 
+  group_by(persinc) %>% summarise(n = n()) %>% mutate(freq = n/sum(n)) %>% merge(inc_quantiles) %>% 
+#  mutate(persinc = fct_relabel(persinc, latex_safe)) %>% 
+  ggplot(aes(x = persinc)) +
+  geom_bar(aes(y = freq), stat = 'identity', linetype = 'solid', fill = NA, color = 'black', width = 1) +
+  geom_step(aes(y = share, group=1),
+            linetype = 'dotted',
+            direction = 'mid') +
+  labs(y = 'Share of responses', x = 'Personal income') +
+  theme_pubr() +
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))
+#dev.off()
+```
+
+```{r Figure persinc in tracks to expected}
+# Uncomment to export
+#tikz(path(figures_path, 'persinc-dist-tracks.tex'),
+#     width = fw(0.48), height = fh(0.48)*2,
+#     pointsize = 8)
+data$tracks %>% st_drop_geometry() %>% 
+  group_by(persinc) %>% summarise(n = n()) %>% mutate(freq = n/sum(n)) %>% merge(inc_quantiles) %>% 
+#  mutate(persinc = fct_relabel(persinc, latex_safe)) %>% 
+  ggplot(aes(x = persinc)) +
+  geom_bar(aes(y = freq), stat = 'identity', linetype = 'solid', fill = NA, color = 'black', width = 1) +
+  geom_step(aes(y = share, group=1),
+            linetype = 'dotted',
+            direction = 'mid') +
+  labs(y = 'Share of tracks', x = 'Personal income') +
+  theme_pubr() +
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))
+#dev.off()
+```
+
+```{r Figure hhinc in survey to expected}
+data$survey %>% count(hhinc)
+# Uncomment to export
+#tikz(path(figures_path, 'hhinc-dist.tex'),
+#     width = fw(0.48), height = fh(0.48)*2,
+#     pointsize = 8)
+data$survey %>% 
+  group_by(hhinc) %>% summarise(n = n()) %>% mutate(freq = n/sum(n)) %>% merge(inc_quantiles) %>% 
+#  mutate(hhinc = fct_relabel(hhinc, latex_safe)) %>% 
+  ggplot(aes(x = hhinc)) +
+  geom_bar(aes(y = freq), stat = 'identity', linetype = 'solid', fill = NA, color = 'black', width = 1) +
+  geom_step(aes(y = share, group=1),
+            linetype = 'dotted',
+            direction = 'mid') +
+  labs(y = 'Share of responses', x = 'Household income') +
+  theme_pubr() +
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))
+#dev.off()
+```
+
+```{r Figure hhinc in tracks to expected}
+# Uncomment to export
+#tikz(path(figures_path, 'hhinc-dist-tracks.tex'),
+#     width = fw(0.48), height = fh(0.48)*2,
+#     pointsize = 8)
+data$tracks %>% st_drop_geometry %>% 
+  group_by(hhinc) %>% summarise(n = n()) %>% mutate(freq = n/sum(n)) %>% merge(inc_quantiles) %>% 
+#  mutate(hhinc = fct_relabel(hhinc, latex_safe)) %>% 
+  ggplot(aes(x = hhinc)) +
+  geom_bar(aes(y = freq), stat = 'identity', linetype = 'solid', fill = NA, color = 'black', width = 1) +
+  geom_step(aes(y = share, group=1),
+            linetype = 'dotted',
+            direction = 'mid') +
+  labs(y = 'Share of tracks', x = 'Household income') +
+  theme_pubr() +
+  theme(axis.text.x = element_text(angle=45, vjust=1, hjust=1))
+#dev.off()
+```
+
+```{r}
+data$survey %>% count(citizenship)
+data$survey %>% 
+  ggplot(aes(citizenship)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% summarise(citizenship == 'Österreich') %>% Hmisc::describe()
+Hmisc::describe(data$survey$citizenship_eu)
+data$survey %>% 
+  ggplot(aes(citizenship_eu)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% count(cob)
+data$survey %>% 
+  ggplot(aes(cob)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% count(cobp1)
+data$survey %>% 
+  ggplot(aes(cobp1)) +
+  geom_bar()
+```
+
+```{r}
+data$survey %>% count(cobp2)
+data$survey %>% 
+  ggplot(aes(cobp2)) +
+  geom_bar()
+```
+
+```{r}
+Hmisc::describe(data$survey$nwparent)
+data$survey %>% ggplot(aes(nwparent)) + geom_bar()
+```
+
+```{r}
+data$survey %>% filter(hhbikes < 1000) %>% dplyr::select(hhbikes) %>% Hmisc::describe()
+data$survey %>% filter(hhbikes < 1000) %>% 
+  ggplot(aes(hhbikes)) +
+  geom_bar()
+```
+
+```{r}
+data$tracks$hhbikes[data$tracks$hhbikes > 20] <- NA # 1
+data$tracks %>% st_drop_geometry %>% group_by(token,hhbikes) %>% tally %>% ggplot() + geom_jitter(aes(x = hhbikes, y = n))
+data$tracks %>% st_drop_geometry %>% group_by(token,hhbikes) %>% tally %$% cor.test(n, hhbikes, method = 'spearman')
+```
+
+```{r}
+workperks <- data$survey %>%
+  count(flextime, homeoffice) %>%
+  mutate(flextime = ifelse(flextime, 'Flexible hours', NA), homeoffice = ifelse(homeoffice, 'Home office', NA)) %>%
+  unite(perk, flextime, homeoffice, sep = ', ', na.rm = TRUE) %>%
+  mutate(share = n/nrow(data$survey))
+workperks
+workperks %>% 
+  ggplot(aes(x=perk,y=share)) +
+  geom_bar(stat='identity') +
+  scale_y_continuous(labels=percent)
+```
+
+Simple dispersion test to check whether counts per person follow poisson distribution. They don't.
+```{r}
+dispersion_test <- function(x) 
+{
+  res <- 1-2 * abs((1 - pchisq((sum((x - mean(x))^2)/mean(x)), length(x) - 1))-0.5)
+
+  cat("Dispersion test of count data:\n",
+      length(x), " data points.\n",
+      "Mean: ",mean(x),"\n",
+      "Variance: ",var(x),"\n",
+      "Probability of being drawn from Poisson distribution: ", 
+      round(res, 3),"\n", sep = "")
+
+  invisible(res)
+}
+data$tracks %>% st_drop_geometry() %>% count(token) %$% dispersion_test(n)
+```
+
+Better fit is log-transformed normal distribution:
+```{r}
+data$tracks %>% st_drop_geometry() %>% count(token) %>% mutate(log_n = log(n)) %>% ggdensity(x = "log_n") +
+  stat_overlay_normal_density(linetype = "dashed") +
+  labs(title = 'Density of log-transformed number of tracks per person', subtitle = 'Compared to normal distribution')
+```
+
+Tests can therefore be performed either with non-parametric tests, like the Kruskal-Wallis test.
+```{r}
+data$tracks %>% st_drop_geometry() %>% count(token, homeoffice) %>% kruskal.test(n ~ homeoffice, data = .)
+data$tracks %>% st_drop_geometry() %>% count(token, flextime) %>% kruskal.test(n ~ flextime, data = .)
+```
+
+Or *t*-tests are performed using the log-transformed counts. Both tests show homeoffice and flexible hours alone have no significant impact on the number of tracks.
+```{r}
+data$tracks %>% st_drop_geometry() %>% count(token, homeoffice) %>% t.test(log(n) ~ homeoffice, data = .)
+data$tracks %>% st_drop_geometry() %>% count(token, flextime) %>% t.test(log(n) ~ flextime, data = .)
+```
+
+```{r}
+data$tracks %>% st_drop_geometry() %>% count(token, avb_car) %>% kruskal.test(n ~ avb_car, data = .)
+data$tracks %>% st_drop_geometry() %>% count(token, avb_car) %>% t.test(log(n) ~ avb_car, data = .)
+```
+
+## Analysis of number of tracks
+Tracks are on an upward trend:
+```{r}
+data$tracks %>%
+  ggplot(aes(start_time)) +
+  geom_histogram() +
+  labs(title = 'Distribution of tracks over time')
+```
+
+Here as line graph of track counts per week. (Use this for showing parallel trends)
+```{r Figure tracks per week}
+# Uncomment to export
+#tikz(path(figures_path, 'tracks-per-week.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+data$tracks %>%
+  st_drop_geometry() %>% 
+  group_by(week=floor_date(start_time, "week")) %>% 
+  summarize(n = n()) %>%
+  ungroup() %>% 
+  add_column(lt = factor(1)) %>% 
+  ggplot() +
+  geom_step(aes(x = week, y = n), color = 'black', linetype = 1) + 
+  geom_step(aes(x = week, y = n, linetype = lt)) + 
+  geom_vline(xintercept = as.numeric(ymd_hms('2019-11-29 00:00:00')), linetype = 2) +
+  annotate("text", x = ymd_hms('2019-11-29 00:00:00'), y = 1100, label = "Linke Wienzeile\n", angle = 90, size=4) +
+  geom_vline(xintercept = as.numeric(ymd_hms('2020-03-16 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.numeric(ymd_hms('2020-11-17 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.numeric(ymd_hms('2020-12-26 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.numeric(ymd_hms('2021-11-22 00:00:00')), linetype = 3) +
+  scale_linetype_manual(name='',
+                        breaks = c('Tracks', 'Intervention', 'Lockdown'),
+                        values = c('Tracks' = 'solid', 'Intervention' = 'dashed', 'Lockdown' = 'dotted')) +
+  labs(y = 'Total number of tracks per week') +
+  theme_pubr(legend = 'top')
+#dev.off()
+```
+
+```{r Figure tracks per month}
+# Uncomment to export
+#tikz(path(figures_path, 'tracks-per-month.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+data$tracks %>%
+  st_drop_geometry() %>% 
+  group_by(month=floor_date(start_time, "month")) %>% 
+  summarize(n = n()) %>%
+  ungroup() %>% 
+  add_column(lt = factor(1)) %>% 
+  ggplot() +
+  geom_step(aes(x = month, y = n), color = 'black', linetype = 1) + 
+  geom_step(aes(x = month, y = n, linetype = lt)) + 
+  geom_vline(xintercept = as.numeric(ymd_hms('2019-11-29 00:00:00')), linetype = 2) +
+  annotate("text", x = ymd_hms('2019-11-29 00:00:00'), y = 4100, label = "Linke Wienzeile\n", angle = 90, size=4) +
+  geom_vline(xintercept = as.numeric(ymd_hms('2020-03-16 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.numeric(ymd_hms('2020-11-17 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.numeric(ymd_hms('2020-12-26 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.numeric(ymd_hms('2021-11-22 00:00:00')), linetype = 3) +
+  scale_linetype_manual(name='',
+                        breaks = c('Tracks', 'Intervention', 'Lockdown'),
+                        values = c('Tracks' = 'solid', 'Intervention' = 'dashed', 'Lockdown' = 'dotted')) +
+  labs(y = 'Total number of tracks per month') +
+  theme_pubr(legend = 'top')
+#dev.off()
+```
+
+```{r Figure unique riders per week}
+# Uncomment to export
+#tikz(path(figures_path, 'unique-riders-per-week.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+data$tracks <- data$tracks %>% mutate(week = cut.Date(as.Date(start_time), breaks = '1 week'))
+aggregate(token ~ week, data$tracks, function(x) length(unique(x))) %>% 
+  mutate(week = as.Date(week)) %>% 
+  add_column(lt = factor(1)) %>% 
+  ggplot() +
+  geom_step(aes(x = week, y = token, group = 1)) +
+  geom_step(aes(x = week, y = token, linetype = lt)) + 
+  geom_vline(xintercept = as.Date(ymd_hms('2019-11-29 00:00:00')), linetype = 2) +
+  annotate("text", x = as.Date(ymd_hms('2019-11-29 00:00:00')), y = 150, label = "Linke Wienzeile\n", angle = 90, size=4) +
+  geom_vline(xintercept = as.Date(ymd_hms('2020-03-16 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.Date(ymd_hms('2020-11-17 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.Date(ymd_hms('2020-12-26 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.Date(ymd_hms('2021-11-22 00:00:00')), linetype = 3) +
+  scale_linetype_manual(name='',
+                        breaks = c('Riders', 'Intervention', 'Lockdown'),
+                        values = c('Riders' = 'solid', 'Intervention' = 'dashed', 'Lockdown' = 'dotted')) +
+  scale_x_date(labels = date_format("%Y"), breaks = date_breaks("1 year")) +
+  labs(x = 'week', y = 'Number of unique riders per week') +
+  theme_pubr(legend = 'top')
+#dev.off()
+```
+
+```{r Figure unique riders per month}
+# Uncomment to export
+#tikz(path(figures_path, 'unique-riders-per-month.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+data$tracks <- data$tracks %>% mutate(month = cut.Date(as.Date(start_time), breaks = '1 month'))
+aggregate(token ~ month, data$tracks, function(x) length(unique(x))) %>% 
+  mutate(month = as.Date(month)) %>% 
+  add_column(lt = factor(1)) %>% 
+  ggplot() +
+  geom_step(aes(x = month, y = token, group = 1)) +
+  geom_step(aes(x = month, y = token, linetype = lt)) + 
+  geom_vline(xintercept = as.Date(ymd_hms('2019-11-29 00:00:00')), linetype = 2) +
+  annotate("text", x = as.Date(ymd_hms('2019-11-29 00:00:00')), y = 210, label = "Linke Wienzeile\n", angle = 90, size=4) +
+  geom_vline(xintercept = as.Date(ymd_hms('2020-03-16 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.Date(ymd_hms('2020-11-17 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.Date(ymd_hms('2020-12-26 00:00:00')), linetype = 3) +
+  geom_vline(xintercept = as.Date(ymd_hms('2021-11-22 00:00:00')), linetype = 3) +
+  scale_linetype_manual(name='',
+                        breaks = c('Riders', 'Intervention', 'Lockdown'),
+                        values = c('Riders' = 'solid', 'Intervention' = 'dashed', 'Lockdown' = 'dotted')) +
+  scale_x_date(labels = date_format("%Y"), breaks = date_breaks("1 year")) +
+  labs(x = 'month', y = 'Number of unique riders per month') +
+  theme_pubr(legend = 'top')
+#dev.off()
+```
+
+But this is not reflected in when respondents record their first track. Is seasonal but does not imply that data set is comprised of mainly new users. But it does 
+```{r}
+aggregate(data$tracks$start_time, by=list(data$tracks$token), FUN=min) %>% 
+  mutate(first = as.Date.POSIXct(x)) %>% 
+  ggplot(aes(first)) +
+  geom_histogram(binwidth = 30) +
+  scale_x_date(labels = date_format("%Y-%m"), breaks = date_breaks("4 month"), guide = guide_axis(angle = 90)) +
+  labs(title = "Histogram of respondents' first tracks", x = 'Date')
+```
+
+Cumulative distribution shows: Steady increase of new first tracks. 50% of respondents record their first track before September 2019.
+```{r Figure cdf first tracks}
+# Uncomment to export
+#tikz(path(figures_path, 'cdf-first-tracks.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+aggregate(data$tracks$start_time, by=list(data$tracks$token), FUN=min) %>% 
+  mutate(first = as.Date.POSIXct(x)) %>% 
+  add_column(lt = factor(1)) %>% 
+  ggplot() +
+  stat_ecdf(aes(first, linetype = lt)) +
+  stat_ecdf(aes(first), pad = F) +
+  geom_segment(aes(x = ymd('2017-07-01'), xend = ymd('2022-06-30'), y = 0, yend = 1), linetype = 4, size = .1) +
+  geom_vline(xintercept = as.Date(ymd_hms('2019-11-29 00:00:00')), linetype = 2) +
+  annotate("text", x = as.Date(ymd_hms('2019-11-29 00:00:00')), y = 0.8, label = "Linke Wienzeile\n", angle = 90, size=4) +
+  scale_x_date(labels = date_format("%Y"), breaks = date_breaks("1 year")) +
+  scale_y_continuous(breaks = seq(0, 1, by=.1)) +
+  scale_linetype_manual(name='',
+                        breaks = c('First tracks', 'linear progression', 'Intervention'),
+                        values = c('First tracks' = 'solid', 'Intervention' = 'dashed', 'linear progression' = 'dotdash')) +
+  labs(x = '', y = "Cumulative share of respondents' first tracks") +
+  theme_pubr() +
+  theme(panel.grid.major = element_line(size = 0.2, linetype = 1))
+#dev.off()
+```
+
+```{r}
+aggregate(data$tracks$start_time, by=list(data$tracks$token), FUN=max) %>% 
+  mutate(last = as.Date.POSIXct(x)) %>% 
+  ggplot(aes(last)) +
+  stat_ecdf(pad = F) +
+  scale_x_date(labels = date_format("%Y-%m"), breaks = date_breaks("4 month"), guide = guide_axis(angle = 90)) +
+  scale_y_continuous(labels = scales::percent, breaks = seq(0, 1, by=.1)) +
+  labs(title = "Cumulative Distribution of respondents' last tracks", x = 'Date', y = 'Cumulative share')
+```
+
+Total number of tracks decreases generally decreases over time. This is intuitive: Respondents had less time to record tracks. However, no massive decline.
+```{r}
+merge(
+  aggregate(data$tracks$start_time, by=list(data$tracks$token), FUN=length) %>% rename(n = x),
+  aggregate(data$tracks$start_time, by=list(data$tracks$token), FUN=min) %>% mutate(first = as.Date.POSIXct(x))
+) %>% 
+  ggplot(aes(x = first, y = n)) +
+  geom_point() +
+  scale_x_date(labels = date_format("%Y-%m"), breaks = date_breaks("4 month"), guide = guide_axis(angle = 90)) +
+  labs(title = "Respondent's track count by first track", x = 'Date of first track', y = 'Total track count')
+```
+
+```{r}
+merge(
+  aggregate(data$tracks$start_time, by=list(data$tracks$token), FUN=length) %>% rename(n = x),
+  aggregate(data$tracks$start_time, by=list(data$tracks$token), FUN=min) %>% mutate(first = as.numeric(x))
+) %$% cor.test(n, first, method = 'spearman')
+```
+
+```{r Figure histogram tracks per rider}
+# Uncomment to export
+#tikz(path(figures_path, 'tracks-perrider-hist.tex'),
+#     width = fw(0.5)*2, height = fh(0.5),
+#     pointsize = 8)
+data$tracks %>% 
+  st_drop_geometry %>% 
+  count(token) %>% 
+  gghistogram('n', xlab = 'Number of tracks per respondent', binwidth = 25)
+  #ggdensity('n', xlab = 'Number of tracks per respondent', rug = T, fill = 'black')
+#dev.off()
+```
+
+Standard deviation of start time shows frequency of rides: If it is low, riders take rides in short succession. If it is high, rides are few and far between. If it is zero, there is only one ride. 68% of a rider's tracks are within 1 SD of the mean, 95% within 2 SD.
+The distribution at hand shows relatively high SD: for 50% of riders it is over 40 weeks.
+```{r Figure CDF sd starttime}
+# Uncomment to export
+#tikz(path(figures_path, 'cdf-sd-starttime.tex'),
+#     width = fw(0.48), height = fh(0.48),
+#     pointsize = 8)
+aggregate(start_time ~ token, data$tracks, function(x) sd = sd(x)) %>% 
+  ggplot(aes(start_time)) +
+  stat_ecdf(pad = F) +
+  scale_x_time(labels = function(x) as.duration(x) %/% ddays(7), breaks = breaks_width('16 weeks')) +
+  scale_y_continuous(breaks = seq(0, 1, by=.2)) +
+  labs(x = 'weeks', y = 'Cumulative share') +
+  theme_pubr() +
+  theme(panel.grid.major = element_line(size = 0.2, linetype = 1))
+#dev.off()
+```
+
+However, the average time between tracks might be a better indicator, as tracks are not normally distributed over time. It is also more intuitive to interpret. Over 50% of riders have less than 6 weeks between tracks, 95% less than 48 weeks.
+```{r Figure CDF average difference starttime}
+# Uncomment to export
+#tikz(path(figures_path, 'cdf-avgdiff-starttime.tex'),
+#     width = fw(0.48), height = fh(0.48),
+#     pointsize = 8)
+aggregate(start_time ~ token, data$tracks, function(x) (max(x)-min(x))/(length(x)-1)) %>% 
+  ggplot(aes(start_time)) +
+  stat_ecdf(pad = F) +
+  scale_x_time(labels = function(x) as.duration(x) %/% ddays(7), breaks = breaks_width('12 weeks')) +
+  scale_y_continuous(breaks = seq(0, 1, by=.2)) +
+  labs(x = 'weeks', y = 'Cumulative share') +
+  theme_pubr() +
+  theme(panel.grid.major = element_line(size = 0.2, linetype = 1))
+#dev.off()
+```
+
+```{r}
+data$tracks %>%
+  dplyr::select(token, gender, start_time) %>% st_drop_geometry() %>%
+  group_by(token, gender, month=floor_date(start_time, "month"), .drop=F) %>%
+  tally() %>%
+  ungroup %>%
+  complete(month, nesting(token, gender), fill = list(n = 0)) %>% 
+  group_by(token, gender) %>% 
+  summarise(mean(n)) %>% 
+  ungroup %>% 
+  ggplot(aes(x = `mean(n)`, y = gender)) +
+  geom_boxplot() +
+  labs(title = 'Mean number of tracks per month per gender', x = 'Mean number of tracks per month', y = NULL)
+```
+
+```{r}
+data$tracks %>% st_drop_geometry %>% 
+  count(gender, week=floor_date(start_time, "week"), .drop=F) %>%
+  complete(week, gender, fill = list(n = 0)) %>% 
+  ggplot(aes(x = week, y = n, linetype = gender)) +
+  geom_line() +
+  labs(title = 'Weekly number of tracks by gender')
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>%
+  count(token, gender) %>%
+  ggplot(aes(x = n, y = gender)) +
+  geom_boxplot()
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, gender) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = n/ceiling(as.double(difftime(last, first, units = 'days')))) %>% 
+  #filter(avg*7 < 10) %>% 
+  filter(n > 5) %>% 
+  ggplot(aes(x = (avg*7), y = gender)) +
+  geom_violin() +
+  labs(title = "Distribution of mean weekly tracks during active time", subtitle = "From a user's first to last track, users with > 5 tracks", x = 'Mean weekly tracks during active time')
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, gender) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = n/ceiling(as.double(difftime(last, first, units = 'days')))) %>% 
+  #filter(avg*7 < 10) %>% 
+  #filter(n > 5) %>% 
+  #filter((last - first) > dyears(1)) %>% 
+  ggplot() +
+  #geom_density() +
+  geom_histogram(aes(avg*7)) +
+  #stat_function(fun = dpois, args = list(lambda = mean(.$avg))) +
+  labs(title = "Mean weekly tracks during active time", subtitle = "From a user's first to last track.", x = 'Mean weekly tracks during active time')
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token) %>% 
+  summarise(first = min(start_time), last = max(start_time)) %>% 
+  merge(data$tracks) %>% 
+  count(token, first, last, week=floor_date(start_time, "week"), .drop=F) %>%
+  complete(week, nesting(token, first, last), fill = list(n = 0)) %>%
+  filter(floor_date(week, "week") >= floor_date(first, "week") & floor_date(week, "week") <= floor_date(last, "week")) %>% 
+  dplyr::select(n) %>% Hmisc::describe()
+```
+
+```{r}
+weekly_counts <- data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token) %>% 
+  summarise(first = min(start_time), last = max(start_time)) %>% 
+  merge(data$tracks) %>% 
+  count(token, first, last, week=floor_date(start_time, "week"), .drop=F) %>%
+  complete(week, nesting(token, first, last), fill = list(n = 0)) %>%
+  dplyr::select(-token) %>%
+  #filter(floor_date(week, "week") >= floor_date(first, "week") & floor_date(week, "week") <= floor_date(last, "week"))
+  filter(floor_date(week, "week") >= floor_date(first, "week"))
+```
+
+```{r}
+theta <- ((var(weekly_counts$n)-mean(weekly_counts$n))/mean(weekly_counts$n)^2)^-1
+weekly_counts$dnbinom <- dnbinom(weekly_counts$n, mu = mean(weekly_counts$n), size = theta)
+weekly_counts$rnbinom <- rnbinom(weekly_counts$n, mu = mean(weekly_counts$n), size = theta)
+weekly_counts %>% 
+  ggplot() +
+    #geom_histogram(aes(x = n, y=..count../sum(..count..))) +
+    #geom_density(aes(x = n)) +
+    #geom_line(aes(x = n, y = dnbinom), colour = 'blue')
+    geom_density(aes(x = rnbinom), colour = 'blue')
+```
+
+```{r}
+weekly_counts %<>% mutate(log_n = log(n+.001))
+weekly_counts %>% 
+  #ggdensity(x = "log_n") + stat_overlay_normal_density(linetype = "dashed") + labs(title = 'Density of number of tracks per week per person during their active time', subtitle = 'Compared to normal distribution')
+  #identity() %$% dispersion_test(n)
+  #identity() %$% var(n)
+  filter(n == 0) %>% 
+  dplyr::select(n) %>% Hmisc::describe()
+  #dplyr::select(n) %>% psych::describe()
+  #filter(n >= 70) %>% 
+  #arrange(desc(n)) %>% head(100)# %>% 
+    #dplyr::select(token) %>% n_distinct
+    #ggplot(aes(n)) + geom_histogram()
+  #filter(n >= 70) %>% dplyr::select(token) %>% merge(data$tracks) %>%
+    #ggplot() + geom_sf(aes(geometry = geometry))
+    #dplyr::select(distance_meters, duration_seconds) %>% Hmisc::describe()
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token) %>% 
+  summarise(first = min(start_time), last = max(start_time)) %>% 
+  merge(data$tracks) %>% 
+  count(token, first, last, month=floor_date(start_time, "month"), .drop=F) %>%
+  complete(month, nesting(token, first, last), fill = list(n = 0)) %>%
+  filter(floor_date(month, "month") >= floor_date(first, "month") & floor_date(month, "month") <= floor_date(last, "month")) %>% 
+  mutate(log_n = log(n+.05)) %>% 
+  ggdensity(x = "log_n") + stat_overlay_normal_density(linetype = "dashed") + labs(title = 'Density of number of tracks per month per person during their active time', subtitle = 'Compared to normal distribution')
+  #dispersion_test(n)
+  #dplyr::select(n) %>% Hmisc::describe()
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token) %>% 
+  summarise(first = min(start_time), last = max(start_time)) %>% 
+  merge(data$tracks) %>% 
+  count(token, first, last, quarter=floor_date(start_time, "quarter"), .drop=F) %>%
+  complete(quarter, nesting(token, first, last), fill = list(n = 0)) %>%
+  filter(floor_date(quarter, "quarter") >= floor_date(first, "quarter") & floor_date(quarter, "quarter") <= floor_date(last, "quarter")) %>% 
+  mutate(log_n = log(n+.1)) %>% 
+  ggdensity(x = "log_n") + stat_overlay_normal_density(linetype = "dashed") + labs(title = 'Density of number of tracks per quarter per person during their active time', subtitle = 'Compared to normal distribution')
+  #identity() %$% dispersion_test(n)
+  #dplyr::select(n) %>% Hmisc::describe()
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token) %>% 
+  summarise(first = min(start_time), last = max(start_time)) %>% 
+  merge(data$tracks) %>% 
+  count(token, first, last, year=floor_date(start_time, "year"), .drop=F) %>%
+  complete(year, nesting(token, first, last), fill = list(n = 0)) %>%
+  filter(floor_date(year, "year") >= floor_date(first, "year") & floor_date(year, "year") <= floor_date(last, "year")) %>% 
+  mutate(log_n = log(n+1)) %>% 
+  ggdensity(x = "log_n") + stat_overlay_normal_density(linetype = "dashed") + labs(title = 'Density of number of tracks per year per person during their active time', subtitle = 'Compared to normal distribution')
+  #identity() %$% dispersion_test(n)
+  #dplyr::select(n) %>% Hmisc::describe()
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, gender) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  ggplot() +
+  geom_boxplot(aes(x = n, y = factor(floor_date(first, "year")))) +
+  facet_grid(gender ~ .)
+```
+
+```{r Figure boxviolplot gender}
+# Uncomment to export
+#tikz(path(figures_path, 'boxviolplot-gender.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, gender) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = 7*(n/ceiling(as.double(difftime(last, first, units = 'days'))))) %>%
+  filter(avg <= 14) %>% 
+  ggviolin(x = 'gender', y = 'avg',
+           trim = T,
+           add = 'boxplot', add.params = list(width = 0.1),
+           ylab = 'Mean weekly tracks during active time',
+           xlab = "(excluding outliers averaging > 2 tracks per day)"
+           ) +
+  stat_compare_means(comparisons = list( c("male", "female"), c("female", "other"), c("male", "other")), 
+                     label = "p.signif") + # Add significance levels
+  stat_compare_means(label.y = 20) +
+  theme(panel.grid.major.y = element_line(size = 0.3, linetype = 1))
+#dev.off()
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, gender) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = n/ceiling(as.double(difftime(last, first, units = 'days')))) %>%
+  filter(gender %in% c('male', 'female')) %>% 
+  filter(avg < Inf) %>% 
+  ungroup %>% group_by(gender) %>% 
+  summarise(mean_weekly = mean(avg*7))
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, gender) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = n/ceiling(as.double(difftime(last, first, units = 'days')))) %>%
+  filter(gender %in% c('male', 'female')) %>% 
+  filter(avg < Inf) %T>% 
+  {t.test(log(avg*7) ~ gender, data = .) %>% print} %>%
+  kruskal.test(log(avg*7) ~ gender, data = .)
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = n/ceiling(as.double(difftime(last, first, units = 'days')))) %>%
+  #filter(avg*7 < 10) %>% 
+  ggplot() +
+  geom_point(aes(first, avg*7)) +
+  labs(title = "Mean weekly tracks by first track", subtitle = "Mean weekly trips from a user's first to last track", x = 'Date of first track', y = 'Mean weekly tracks during active time')
+```
+
+```{r Figure boxviolplot persinc}
+# Uncomment to export
+#tikz(path(figures_path, 'boxviolplot-persinc.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, persinc, education, worksituation, hhinc) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = 7*n/ceiling(as.double(difftime(last, first, units = 'days')))) %>% 
+  filter(avg <= 14) %>% 
+#  mutate(persinc = fct_relabel(persinc, latex_safe)) %>% 
+  ggviolin(x = 'persinc', y = 'avg',
+           trim = T,
+           add = 'boxplot', add.params = list(width = 0.1),
+           ylab = 'Mean weekly tracks during active time',
+           xlab = "(excluding outliers averaging > 2 tracks per day)"
+           ) +
+  stat_compare_means(label.y = 15) +
+  theme(panel.grid.major.y = element_line(size = 0.3, linetype = 1),
+        axis.text.x = element_text(angle=45, vjust=1, hjust=1))
+#dev.off()
+```
+
+```{r Figure boxviolplot hhinc}
+# Uncomment to export
+#tikz(path(figures_path, 'boxviolplot-hhinc.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, persinc, education, worksituation, hhinc) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = 7*n/ceiling(as.double(difftime(last, first, units = 'days')))) %>% 
+  filter(avg <= 14) %>% 
+#  mutate(hhinc = fct_relabel(hhinc, latex_safe)) %>% 
+  ggviolin(x = 'hhinc', y = 'avg',
+           trim = T,
+           add = 'boxplot', add.params = list(width = 0.1),
+           ylab = 'Mean weekly tracks during active time',
+           xlab = "(excluding outliers averaging > 2 tracks per day)"
+           ) +
+  stat_compare_means(label.y = 15) +
+  theme(panel.grid.major.y = element_line(size = 0.3, linetype = 1),
+        axis.text.x = element_text(angle=45, vjust=1, hjust=1))
+#dev.off()
+```
+
+```{r Figure boxviolplot education}
+# Uncomment to export
+#tikz(path(figures_path, 'boxviolplot-education.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, persinc, education, worksituation, hhinc) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = 7*n/ceiling(as.double(difftime(last, first, units = 'days')))) %>% 
+  filter(avg <= 14) %>% 
+  ggviolin(x = 'education', y = 'avg',
+           trim = T,
+           add = 'boxplot', add.params = list(width = 0.1),
+           ylab = 'Mean weekly tracks during active time',
+           xlab = "(excluding outliers averaging > 2 tracks per day)"
+           ) +
+  stat_compare_means(label.y = 20) +
+  theme(panel.grid.major.y = element_line(size = 0.3, linetype = 1))
+#dev.off()
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  mutate(tertiary = education == 'tertiary') %>% 
+  group_by(token, tertiary) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = n/ceiling(as.double(difftime(last, first, units = 'days')))) %>%
+  filter(avg < Inf) %T>% 
+  {t.test(log(avg*7) ~ tertiary, data = .) %>% print} %>%
+  kruskal.test(log(avg*7) ~ tertiary, data = .)
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, gender, persinc, education, age) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = n/ceiling(as.double(difftime(last, first, units = 'days')))) %>% 
+  filter(avg < 1) %>% 
+  ggplot(aes(avg*7)) +
+  geom_jitter(aes(y = age)) +
+  labs(title = "Distribution of mean weekly tracks during active time", subtitle = "From a user's first to last track", x = 'Mean weekly tracks during active time') +
+  facet_grid(gender ~ education)
+```
+
+```{r}
+data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token, hhtype, hhinc, hhbikes, nkids, nyouth) %>% 
+  summarise(n = n(), first = min(start_time), last = max(start_time)) %>% 
+  mutate(avg = n/ceiling(as.double(difftime(last, first, units = 'days')))) %>% 
+  #filter(avg*7 < 10) %>% 
+  ggplot(aes(avg*7)) +
+  #geom_jitter(aes(y = hhbikes)) +
+  #geom_histogram() + #facet_grid(hhtype ~ hhinc) +
+  #geom_jitter(aes(y = hhinc), alpha = .5) +
+  #geom_jitter(aes(y = hhtype), alpha = .5) +
+  #geom_boxplot(aes(y = factor(nkids))) +
+  geom_boxplot(aes(y = factor(nyouth))) +
+  labs(title = "Distribution of mean weekly tracks during active time", subtitle = "From a user's first to last track", x = 'Mean weekly tracks during active time')
+```
+
+```{r}
+data$tracks %>% st_drop_geometry %>% group_by(token, age, education) %>% tally %>% arrange(desc(n)) %>% ggplot(aes(x = education, y = n)) + geom_jitter()
+```
+ 
+```{r}
+data$tracks %>% st_drop_geometry %>% 
+  count(education, week=floor_date(start_time, "week"), .drop=F) %>%
+  complete(week, education, fill = list(n = 0)) %>% 
+  ggplot(aes(x = week, y = n, colour = education)) +
+  geom_line() +
+  labs(title = 'Weekly number of tracks by education')
+```

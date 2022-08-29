@@ -1,0 +1,2611 @@
+---
+title: "Dissertation: Analysis"
+author: "Samuel Hönle"
+date: "2022-08-29"
+output:
+  bookdown::html_document2:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: paper
+    highlight: kate
+    smart: true
+    code_folding: hide
+---
+
+```{r, results='hide'}
+library(tictoc)
+
+library(tidyverse)
+library(scales)
+library(lubridate)
+library(fs)
+library(sf)
+library(magrittr)
+library(patchwork)
+library(tikzDevice)
+library(reporttools)
+library(ggpubr)
+
+library(pscl)
+library(glmmADMB)
+library(glmmTMB)
+library(MASS)
+library(stargazer)
+library(lmtest)
+library(sandwich)
+library(parameters)
+
+library(bacondecomp)
+
+source('../helpers/data_preparation.R')
+```
+
+```{r, eval=F}
+# necessary for exports
+figures_path <- read_file('../paths/figures-path.txt')
+tables_path <- read_file('../paths/tables-path.txt')
+
+textwidth_pt <- 398.3386
+textwidth_in <- textwidth_pt / 72.27
+
+golden_ratio <- (5**.5 - 1) / 2
+
+# Figure width
+fw <- function(fract){
+  return(textwidth_in*fract)
+}
+# Figure height
+fh <- function(fract){
+  return(fw(fract) * golden_ratio)
+}
+
+options(tikzLatexPackages=c(getOption( "tikzLatexPackages" ),"\\usepackage{amssymb}"))
+
+latex_safe <- function(value){
+  latex_safe_str <- value
+  latex_safe_str <- str_replace_all(latex_safe_str, '≤', '$\\\\leqslant$')
+  return(latex_safe_str)
+}
+latex_safe_labeller <- function(variable,value){
+  return(latex_safe(value))
+}
+```
+
+```{r}
+version <- '2022-08-02_20-02-15'
+```
+
+```{r}
+data_path <- read_file('../paths/data-path.txt')
+survey_path <- path(data_path, version, paste(version, '_kyuc-export.csv', sep = ''))
+#tracks_path <- path(data_path, version, 'Vienna_2017-2022_10pc.geojson')
+tracks_path <- path(data_path, version, 'Vienna_2017-2022.geojson')
+tic('Data loading and preparation')
+data <- prepare_data(survey_path, tracks_path)
+toc()
+```
+
+## 1. Find first time rider has used infrastructure
+Piece of infrastructure: Radweg Linke Wienzeile
+https://www.fahrradwien.at/news/radweg-linke-wienzeile-fertig/
+
+Buffer of 13 metres (see Merry and Bettinger 2019: upper bound of average positional error)
+
+```{r}
+lwz_geom <- st_linestring(matrix(c(16.3559,48.1965,16.3611,48.1977,16.3650,48.1998), ncol = 2, byrow = T)) %>% st_sfc(crs = 4326)
+lwz_geom_buffer <- lwz_geom %>% st_transform(31258) %>% st_buffer(13) %>% st_transform(4326)
+stopifnot(st_crs(data$tracks) == st_crs(lwz_geom_buffer))
+lwz_open <- ymd('2019-11-29')
+```
+
+```{r}
+lwz_first_intersect <- data$tracks %>% 
+  filter(floor_date(start_time, 'day') >= lwz_open) %>% 
+  filter(st_intersects(geometry, lwz_geom_buffer, sparse = F)) %>% 
+  st_drop_geometry() %>% 
+  group_by(token) %>% 
+  summarise(first_date_time = min(start_time)) %>% 
+  right_join(data$tracks %>% st_drop_geometry() %>% distinct(token))
+lwz_first_intersect <- setNames(lwz_first_intersect$first_date_time, lwz_first_intersect$token)
+```
+
+## 2. Count of weekly/monthly trips
+```{r}
+weekly_counts <- data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token) %>% 
+  summarise(first = min(start_time), last = max(start_time)) %>% 
+  merge(data$tracks) %>% 
+  count(token, first, last, week=floor_date(start_time, "week"), .drop=F) %>%
+  complete(week, nesting(token, first, last), fill = list(n = 0)) %>%
+  filter(floor_date(week, "week") >= floor_date(first, "week")) %>%
+  dplyr::select(-first, -last) %>% 
+  inner_join(data$survey, by = c('token' = 'bc_token'))
+monthly_counts <- data$tracks %>% 
+  st_drop_geometry() %>% 
+  group_by(token) %>% 
+  summarise(first = min(start_time), last = max(start_time)) %>% 
+  merge(data$tracks) %>% 
+  count(token, first, last, month=floor_date(start_time, "month"), .drop=F) %>%
+  mutate(n_norm = n / days_in_month(month) * 30) %>% # add count normalised to 30 day months 
+  complete(month, nesting(token, first, last), fill = list(n = 0, n_norm = 0)) %>%
+  rename(n_complete = n) %>% 
+  mutate(n = ifelse(floor_date(month, "month") >= floor_date(first, "month"), n_complete, NA)) %>% 
+  mutate(n_norm = ifelse(floor_date(month, "month") >= floor_date(first, "month"), n_norm, NA)) %>% 
+  #filter(floor_date(month, "month") >= floor_date(first, "month")) %>%
+  dplyr::select(-first, -last) %>% 
+  inner_join(data$survey, by = c('token' = 'bc_token'))
+```
+
+## 3. Add dummy for post-usage
+```{r}
+weekly_counts %<>%
+  mutate(lwz_post_use = if_else(
+    is.na(lwz_first_intersect[token]),
+    F,
+    week >= floor_date(lwz_first_intersect[token], 'week')
+  ))
+weekly_counts %<>%
+  group_by(token) %>% 
+  mutate(lwz_ever = any(lwz_post_use)) %>% 
+  ungroup
+monthly_counts %<>%
+  mutate(lwz_post_use = if_else(
+    is.na(lwz_first_intersect[token]),
+    F,
+    month >= floor_date(lwz_first_intersect[token], 'month')
+  ))
+monthly_counts %<>%
+  group_by(token) %>% 
+  mutate(lwz_ever = any(lwz_post_use)) %>% 
+  ungroup
+```
+
+```{r}
+weekly_counts %>% 
+  filter(lwz_post_use) %>% 
+  count(week) %>% 
+  ggplot() + geom_line(aes(week, n))
+```
+
+```{r}
+with(weekly_counts,table(n=n>0, lwz_post_use))
+```
+
+## 4. Comparison groups
+### 4.1 Users vs all others
+```{r}
+weekly_counts %>% 
+  group_by(week, lwz_ever) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  group_by(week) %>% 
+  mutate(mean_diff = mean-lag(mean, default = NA), sum_diff = sum-lag(sum, default = NA)) %>% 
+  ungroup %>% 
+  { (
+      (ggplot(.) + geom_step(aes(week, sum, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week')))) #+
+      #(ggplot(.) + geom_step(aes(week, sum_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))))
+    ) /
+    (
+      (ggplot(.) + geom_step(aes(week, mean, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week')))) #+
+      #(ggplot(.) + geom_step(aes(week, mean_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))))
+    )
+  }
+```
+
+```{r Figure common trends all}
+# Uncomment to export
+#tikz(path(figures_path, 'trend-monthly-all.tex'),
+#     width = fw(1), height = fh(1)*1.5,
+#     pointsize = 8)
+monthly_counts %>% 
+  group_by(month, lwz_ever) %>% 
+  summarise(mean = mean(n, na.rm = T), sum = sum(n, na.rm = T), mean_complete = mean(n_complete)) %>% 
+  group_by(month) %>% 
+  mutate(mean_diff = mean-lag(mean, default = NA), sum_diff = sum-lag(sum, default = NA)) %>% 
+  mutate(mean_complete_diff = mean_complete-lag(mean_complete, default = NA)) %>% 
+  ungroup %>% 
+  mutate(lwzever = ifelse(lwz_ever, 'Treated', 'Control')) %>% 
+  { (
+      ggplot(.) +
+        geom_step(aes(month, sum, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        theme_pubr() +
+        labs(linetype = '') +
+        scale_linetype_manual(name='',
+                        breaks = c('Treated', 'Control', 'Intervention'),
+                        values = c('Treated' = 'solid', 'Control' = '22', 'Intervention' = 'dotted'))
+    ) /
+    (
+      ggplot(.) +
+        geom_step(aes(month, mean, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        theme_pubr() +
+        labs(linetype = '') +
+        scale_linetype_manual(name='',
+                        breaks = c('Treated', 'Control', 'Intervention'),
+                        values = c('Treated' = 'solid', 'Control' = '22', 'Intervention' = 'dotted'))
+    )} 
+#dev.off()
+```
+
+```{r Summary stats per group, eval=F}
+# Execute to export
+lwz_user_tokens <- monthly_counts %>% filter(lwz_ever) %>% distinct(token) %>% pull(token)
+
+data$survey %>% 
+  filter(bc_token %in% lwz_user_tokens) %>% 
+  dplyr::select(gender, education, hhtype, worksituation, persinc, hhinc, citizenship_eu, nwparent, homeoffice, flextime, avb_car) %>% 
+  data.frame() %>% 
+  tableNominal(
+    cap = 'Summary statistics of treated respondents (categorical variables)',
+    lab = 'tab:sumstat_treat_cat',
+    caption.placement = 'top',
+    font.size = 'scriptsize'
+  ) %>% 
+  latex_safe() %>% 
+  cat(file = path(tables_path, 'sumstat-treat-cat.tex'))
+data$survey %>% 
+  filter(bc_token %in% lwz_user_tokens) %>% 
+  dplyr::select(age, hhbikes) %>% 
+  data.frame() %>% 
+  tableContinuous(
+    cap = 'Summary statistics of treated respondents (continuous variables)',
+    lab = 'tab:sumstat_treat_cont',
+    longtable = F,
+    caption.placement = 'top',
+    font.size = 'scriptsize'
+  ) %>% 
+  capture.output() %>% 
+  cat(file = path(tables_path, 'sumstat-treat-cont.tex'), sep = '\n')
+
+data$survey %>% 
+  filter(!(bc_token %in% lwz_user_tokens)) %>% 
+  dplyr::select(gender, education, hhtype, worksituation, persinc, hhinc, citizenship_eu, nwparent, homeoffice, flextime, avb_car) %>% 
+  data.frame() %>% 
+  tableNominal(
+    cap = 'Summary statistics of untreated respondents (categorical variables)',
+    lab = 'tab:sumstat_control_cat',
+    caption.placement = 'top',
+    font.size = 'scriptsize'
+  ) %>% 
+  latex_safe() %>% 
+  cat(file = path(tables_path, 'sumstat-control-cat.tex'))
+data$survey %>% 
+  filter(!(bc_token %in% lwz_user_tokens)) %>% 
+  dplyr::select(age, hhbikes) %>% 
+  data.frame() %>% 
+  tableContinuous(
+    cap = 'Summary statistics of untreated respondents (continuous variables)',
+    lab = 'tab:sumstat_control_cont',
+    longtable = F,
+    caption.placement = 'top',
+    font.size = 'scriptsize'
+  ) %>% 
+  capture.output() %>% 
+  cat(file = path(tables_path, 'sumstat-control-cont.tex'), sep = '\n')
+```
+
+
+### 4.2 Users and all from same postcodes
+```{r}
+user_plzs <- weekly_counts %>% 
+  filter(lwz_ever) %>%
+  distinct(plz) %>% 
+  arrange(plz) %>% 
+  pull(plz)
+weekly_counts %<>%
+  mutate(group2 = plz %in% user_plzs)
+monthly_counts %<>%
+  mutate(group2 = plz %in% user_plzs)
+```
+
+```{r}
+weekly_counts %>% 
+  filter(group2) %>% 
+  group_by(week, lwz_ever) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  group_by(week) %>% 
+  mutate(mean_diff = mean-lag(mean, default = NA), sum_diff = sum-lag(sum, default = NA)) %>% 
+  ungroup %>% 
+  { (
+      (ggplot(.) + geom_step(aes(week, sum, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week')))) #+
+    #(ggplot(.) + geom_step(aes(week, sum_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))))
+    ) /
+    (
+      (ggplot(.) + geom_step(aes(week, mean, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week')))) #+
+      #(ggplot(.) + geom_step(aes(week, mean_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))))
+    )
+  }
+```
+
+```{r}
+monthly_counts %>% 
+  filter(group2) %>% 
+  group_by(month, lwz_ever) %>% 
+  summarise(mean = mean(n, na.rm = T), sum = sum(n, na.rm = T)) %>% 
+  group_by(month) %>% 
+  mutate(mean_diff = mean-lag(mean, default = NA), sum_diff = sum-lag(sum, default = NA)) %>% 
+  ungroup %>% 
+  { (
+      (ggplot(.) + geom_step(aes(month, sum, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')))) #+
+      #(ggplot(.) + geom_step(aes(month, sum_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month'))))
+    ) /
+    (
+      (ggplot(.) + geom_step(aes(month, mean, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')))) #+
+      #(ggplot(.) + geom_step(aes(month, mean_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month'))))
+    )
+  }
+```
+
+### 4.3 Users and all who cycle around changed area
+500 meter buffer
+```{r}
+lwz_area_intersect <- data$tracks %>% 
+  filter(st_intersects(geometry, lwz_geom %>% st_transform(31258) %>% st_buffer(500) %>% st_transform(4326), sparse = F)) %>% 
+  st_drop_geometry() %>% 
+  distinct(token) %>% 
+  pull(token)
+weekly_counts %<>%
+  mutate(group3 = token %in% lwz_area_intersect)
+monthly_counts %<>%
+  mutate(group3 = token %in% lwz_area_intersect)
+```
+
+```{r}
+weekly_counts %>% 
+  filter(group3) %>% 
+  group_by(week, lwz_ever) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  group_by(week) %>% 
+  mutate(mean_diff = mean-lag(mean, default = NA), sum_diff = sum-lag(sum, default = NA)) %>% 
+  ungroup %>% 
+  { (
+      (ggplot(.) + geom_step(aes(week, sum, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week')))) #+
+      #(ggplot(.) + geom_step(aes(week, sum_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))))
+    ) /
+    (
+      (ggplot(.) + geom_step(aes(week, mean, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week')))) #+
+      #(ggplot(.) + geom_step(aes(week, mean_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))))
+    )
+  }
+```
+
+```{r}
+weekly_counts %>% 
+  filter(group3) %>% 
+  filter(year(week) >= 2018 & year(week) <= 2021) %>% 
+  group_by(week, lwz_ever) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  group_by(week) %>% 
+  mutate(mean_diff = mean-lag(mean, default = NA), sum_diff = sum-lag(sum, default = NA)) %>% 
+  ungroup %>% 
+  { (
+      (ggplot(.) + geom_step(aes(week, sum, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week')))) #+
+      #(ggplot(.) + geom_step(aes(week, sum_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))))
+    ) /
+    (
+      (ggplot(.) + geom_step(aes(week, mean, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week')))) #+
+      #(ggplot(.) + geom_step(aes(week, mean_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))))
+    )
+  }
+```
+
+```{r}
+monthly_counts %>% 
+  filter(group3) %>% 
+  group_by(month, lwz_ever) %>% 
+  summarise(mean = mean(n, na.rm = T), sum = sum(n, na.rm = T)) %>% 
+  group_by(month) %>% 
+  mutate(mean_diff = mean-lag(mean, default = NA), sum_diff = sum-lag(sum, default = NA)) %>% 
+  ungroup %>% 
+  { (
+      (ggplot(.) + geom_step(aes(month, sum, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')))) #+
+      #(ggplot(.) + geom_step(aes(month, sum_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month'))))
+    ) /
+    (
+      (ggplot(.) + geom_step(aes(month, mean, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')))) #+
+      #(ggplot(.) + geom_step(aes(month, mean_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month'))))
+    )
+  }
+```
+
+```{r}
+monthly_counts %>% 
+  filter(group3) %>% 
+  filter(year(month) >= 2018 & year(month) <= 2021) %>% 
+  group_by(month, lwz_ever) %>% 
+  summarise(mean = mean(n, na.rm = T), sum = sum(n, na.rm = T)) %>% 
+  group_by(month) %>% 
+  mutate(mean_diff = mean-lag(mean, default = NA), sum_diff = sum-lag(sum, default = NA)) %>% 
+  ungroup %>% 
+  { (
+      (ggplot(.) + geom_step(aes(month, sum, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')))) #+
+      #(ggplot(.) + geom_step(aes(month, sum_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month'))))
+    ) /
+    (
+      (ggplot(.) + geom_step(aes(month, mean, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')))) #+
+      #(ggplot(.) + geom_step(aes(month, mean_diff)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month'))))
+    )
+  }
+```
+
+## 5. DD Regression
+```{r}
+rm(data)
+```
+
+```{r}
+weekly_counts %<>% mutate(month_f = factor(floor_date(week, "month"), ordered = F), week_f = factor(week, ordered = F), token = factor(token, ordered = F))
+monthly_counts %<>% mutate(month_f = factor(month, ordered = F), token = factor(token, ordered = F))
+```
+
+```{r}
+model_path <- function(name) {
+  return(path(data_path, version, 'models', paste0(name, '.RData')))
+}
+```
+
+### 5.1 Model exploration
+All these models were run and saved to file as a first step to explore different model options.
+
+```{r}
+if (file_test('-f', model_path('m_m_nb'))) {
+  load(model_path('m_m_nb'))
+} else {
+  tic()
+  m_m_nb <- glm.nb(n ~ token + month_f + lwz_post_use, data = monthly_counts %>% drop_na(n))
+  exec_time <- toc(quiet = T)
+  m_m_nb$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_nb$BIC <- BIC(m_m_nb)
+  m_m_nb$cluster.se <- sqrt(diag(vcovCL(m_m_nb, cluster = ~ token)))
+  save(m_m_nb, file = model_path('m_m_nb'))
+}
+stargazer(m_m_nb,
+          keep = 'lwz_post_use',
+          se = list(m_m_nb$cluster.se),
+          title = 'Negative binomial regression on monthly counts',
+          type = 'text')
+```
+
+```{r}
+if (file_test('-f', model_path('m_w_nb_1'))) {
+  load(model_path('m_w_nb_1'))
+} else {
+  tic()
+  m_w_nb_1 <- glm.nb(n ~ token + week + lwz_post_use, data = weekly_counts)
+  exec_time <- toc(quiet = T)
+  m_w_nb_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_nb_1$BIC <- BIC(m_w_nb_1)
+  m_w_nb_1$cluster.se <- sqrt(diag(vcovCL(m_w_nb_1, cluster = ~ token)))
+  save(m_w_nb_1, file = model_path('m_w_nb_1'))
+}
+
+if (file_test('-f', model_path('m_w_nb_2'))) {
+  load(model_path('m_w_nb_2'))
+} else {
+  tic()
+  m_w_nb_2 <- glm.nb(n ~ token + week_f + lwz_post_use, data = weekly_counts)
+  exec_time <- toc(quiet = T)
+  m_w_nb_2$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_nb_2$BIC <- BIC(m_w_nb_2)
+  m_w_nb_2$cluster.se <- sqrt(diag(vcovCL(m_w_nb_2, cluster = ~ token)))
+  save(m_w_nb_2, file = model_path('m_w_nb_2'))
+}
+stargazer(m_w_nb_1,
+          m_w_nb_2,
+          se = list(
+            m_w_nb_1$cluster.se,
+            m_w_nb_2$cluster.se
+          ),
+          keep = 'lwz_post_use',
+          title = 'Negative binomial regression on weekly counts',
+          type = 'text')
+```
+
+```{r weekly zeroinfl not used, eval=F}
+if (file_test('-f', model_path('m_w_zinb1_1'))) {
+  load(model_path('m_w_zinb1_1'))
+} else {
+  tic()
+  m_w_zinb1_1 <- zeroinfl(n ~ token + month_f + lwz_post_use | token + month_f,
+                          data = weekly_counts,
+                          dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_w_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_1$AIC <- AIC(m_w_zinb1_1)
+  m_w_zinb1_1$BIC <- BIC(m_w_zinb1_1)
+  m_w_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_1, cluster = ~ token)))
+  m_w_zinb1_1$cluster.se.count <- m_w_zinb1_1$cluster.se[grepl('^count_', names(m_w_zinb1_1$cluster.se))]
+  names(m_w_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_1$SE.theta <- exp(m_w_zinb1_1$SE.logtheta)
+  save(m_w_zinb1_1, file = model_path('m_w_zinb1_1'))
+}
+
+if (file_test('-f', model_path('m_w_zinb1_2'))) {
+  load(model_path('m_w_zinb1_2'))
+} else {
+  tic()
+  m_w_zinb1_2 <- zeroinfl(n ~ token + month_f + lwz_post_use | token,
+                          data = weekly_counts,
+                          dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_w_zinb1_2$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_2$AIC <- AIC(m_w_zinb1_2)
+  m_w_zinb1_2$BIC <- BIC(m_w_zinb1_2)
+  m_w_zinb1_2$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_2, cluster = ~ token)))
+  m_w_zinb1_2$cluster.se.count <- m_w_zinb1_2$cluster.se[grepl('^count_', names(m_w_zinb1_2$cluster.se))]
+  names(m_w_zinb1_2$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_2$SE.theta <- exp(m_w_zinb1_2$SE.logtheta)
+  save(m_w_zinb1_2, file = model_path('m_w_zinb1_2'))
+}
+````
+
+```{r weekly zeroinfl used}
+if (file_test('-f', model_path('m_w_zinb1_3'))) {
+  load(model_path('m_w_zinb1_3'))
+} else {
+  tic()
+  m_w_zinb1_3 <- zeroinfl(n ~ token + week_f + lwz_post_use | token + week_f,
+                          data = weekly_counts,
+                          dist = "negbin")
+  exec_time <- toc(quiet = T) # ~ 50 mins
+  m_w_zinb1_3$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_3$AIC <- AIC(m_w_zinb1_3)
+  m_w_zinb1_3$BIC <- BIC(m_w_zinb1_3)
+  m_w_zinb1_3$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_3, cluster = ~ token)))
+  m_w_zinb1_3$cluster.se.count <- m_w_zinb1_3$cluster.se[grepl('^count_', names(m_w_zinb1_3$cluster.se))]
+  names(m_w_zinb1_3$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_3$SE.theta <- exp(m_w_zinb1_3$SE.logtheta)
+  save(m_w_zinb1_3, file = model_path('m_w_zinb1_3'))
+}
+
+if (file_test('-f', model_path('m_w_zinb1_4'))) {
+  load(model_path('m_w_zinb1_4'))
+} else {
+  tic()
+  m_w_zinb1_4 <- zeroinfl(n ~ token + week_f + lwz_post_use | token,
+                          data = weekly_counts,
+                          dist = "negbin")
+  exec_time <- toc(quiet = T) # ~ 27 mins
+  m_w_zinb1_4$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_4$AIC <- AIC(m_w_zinb1_4)
+  m_w_zinb1_4$BIC <- BIC(m_w_zinb1_4)
+  m_w_zinb1_4$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_4, cluster = ~ token)))
+  m_w_zinb1_4$cluster.se.count <- m_w_zinb1_4$cluster.se[grepl('^count_', names(m_w_zinb1_4$cluster.se))]
+  names(m_w_zinb1_4$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_4$SE.theta <- exp(m_w_zinb1_4$SE.logtheta)
+  save(m_w_zinb1_4, file = model_path('m_w_zinb1_4'))
+}
+
+if (file_test('-f', model_path('m_w_zinb1_5'))) {
+  load(model_path('m_w_zinb1_5'))
+} else {
+  tic()
+  m_w_zinb1_5 <- zeroinfl(n ~ token + week_f + lwz_post_use | 1,
+                          data = weekly_counts,
+                          dist = "negbin")
+  exec_time <- toc(quiet = T) # ~ 10 mins
+  m_w_zinb1_5$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_5$AIC <- AIC(m_w_zinb1_5)
+  m_w_zinb1_5$BIC <- BIC(m_w_zinb1_5)
+  m_w_zinb1_5$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_5, cluster = ~ token)))
+  m_w_zinb1_5$cluster.se.count <- m_w_zinb1_5$cluster.se[grepl('^count_', names(m_w_zinb1_5$cluster.se))]
+  names(m_w_zinb1_5$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_5$SE.theta <- exp(m_w_zinb1_5$SE.logtheta)
+  save(m_w_zinb1_5, file = model_path('m_w_zinb1_5'))
+}
+
+if (file_test('-f', model_path('m_w_zinb1_6'))) {
+  load(model_path('m_w_zinb1_6'))
+} else {
+  tic()
+  m_w_zinb1_6 <- zeroinfl(n ~ token + week_f + lwz_post_use | week_f,
+                          data = weekly_counts,
+                          dist = "negbin")
+  exec_time <- toc(quiet = T) # 
+  m_w_zinb1_6$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_6$AIC <- AIC(m_w_zinb1_6)
+  m_w_zinb1_6$BIC <- BIC(m_w_zinb1_6)
+  m_w_zinb1_6$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_6, cluster = ~ token)))
+  m_w_zinb1_6$cluster.se.count <- m_w_zinb1_6$cluster.se[grepl('^count_', names(m_w_zinb1_6$cluster.se))]
+  names(m_w_zinb1_6$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_6$SE.theta <- exp(m_w_zinb1_6$SE.logtheta)
+  save(m_w_zinb1_6, file = model_path('m_w_zinb1_6'))
+}
+
+# Poisson
+if (file_test('-f', model_path('m_w_zip1_1'))) {
+  load(model_path('m_w_zip1_1'))
+} else {
+  tic()
+  m_w_zip1_1 <- zeroinfl( n ~ token + week_f + lwz_post_use | token + week_f,
+                         data = weekly_counts,
+                         dist = "poisson")
+  exec_time <- toc(quiet = T)
+  m_w_zip1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zip1_1$AIC <- AIC(m_w_zip1_1)
+  m_w_zip1_1$BIC <- BIC(m_w_zip1_1)
+  m_w_zip1_1$cluster.se <- sqrt(diag(vcovCL(m_w_zip1_1, cluster = ~ token)))
+  m_w_zip1_1$cluster.se.count <- m_w_zip1_1$cluster.se[grepl('^count_', names(m_w_zip1_1$cluster.se))]
+  names(m_w_zip1_1$cluster.se.count) %<>% str_replace('^count_','')
+  save(m_w_zip1_1, file = model_path('m_w_zip1_1'))
+}
+
+# Hurdle
+if (file_test('-f', model_path('m_w_hnb1_1'))) {
+  load(model_path('m_w_hnb1_1'))
+} else {
+  tic()
+  m_w_hnb1_1 <- hurdle(n ~ token + week_f + lwz_post_use | token + week_f,
+                       data = weekly_counts,
+                       dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_w_hnb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_hnb1_1$AIC <- AIC(m_w_hnb1_1)
+  m_w_hnb1_1$BIC <- BIC(m_w_hnb1_1)
+  m_w_hnb1_1$cluster.se <- sqrt(diag(vcovCL(m_w_hnb1_1, cluster = ~ token)))
+  m_w_hnb1_1$cluster.se.count <- m_w_hnb1_1$cluster.se[grepl('^count_', names(m_w_hnb1_1$cluster.se))]
+  names(m_w_hnb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_hnb1_1$SE.theta <- exp(m_w_hnb1_1$SE.logtheta)
+  save(m_w_hnb1_1, file = model_path('m_w_hnb1_1'))
+}
+```
+
+```{r glmmadmb trials, eval=F}
+tic()
+m_m_zinb2_1 <- glmmadmb(n ~
+                      #token +
+                      (1|token) +
+                      month_f +
+                      lwz_post_use, 
+                    data=monthly_counts %>% drop_na(n), 
+                    zeroInflation=TRUE,
+                    family="nbinom",
+                    extra.args="-ndi 1000000")
+toc()
+save(m_m_zinb2_1, file = path(data_path, version, 'models', 'm_m_zinb2_1.RData'))
+summary(m_m_zinb2_1)
+tic()
+m_w_zinb2_1 <- glmmadmb(n ~
+                      #token +
+                      (1|token) +
+                      month_f +
+                      lwz_post_use, 
+                    data=weekly_counts, 
+                    zeroInflation=TRUE,
+                    family="nbinom",
+                    extra.args="-ndi 1000000")
+toc()
+save(m_w_zinb2_1, file = path(data_path, version, 'models', 'm_w_zinb2_1.RData'))
+summary(m_w_zinb2_1)
+tic()
+m_w_zinb2_2 <- glmmadmb(n ~
+                      token +
+                      #(1|token) +
+                      month_f +
+                      lwz_post_use, 
+                    data=weekly_counts, 
+                    zeroInflation=TRUE,
+                    family="nbinom",
+                    extra.args="-ndi 1000000")
+toc()
+save(m_w_zinb2_2, file = path(data_path, version, 'models', 'm_w_zinb2_2.RData'))
+summary(m_w_zinb2_2)
+#tic() # takes too long
+#m_w_zinb2_3 <- glmmadmb(n ~
+#                      #token +
+#                      (1|token) +
+#                      week_f +
+#                      lwz_post_use, 
+#                    data=weekly_counts, 
+#                    zeroInflation=TRUE,
+#                    family="nbinom",
+#                    extra.args="-ndi 1000000")
+#toc()
+#summary(m_w_zinb2_3)
+tic()
+m_w_zinb2_4 <- glmmadmb(n ~
+                      token +
+                      #(1|token) +
+                      week_f +
+                      lwz_post_use, 
+                    data=weekly_counts, 
+                    zeroInflation=TRUE,
+                    family="nbinom",
+                    extra.args="-ndi 1000000")
+toc()
+save(m_w_zinb2_4, file = path(data_path, version, 'models', 'm_w_zinb2_4.RData'))
+summary(m_w_zinb2_4)
+```
+
+```{r glmmTMB trials, eval=F}
+tic()
+m_m_zinb3_1 <- glmmTMB(n ~ 
+                     token +
+                     #(1|token) +
+                     month_f +
+                     lwz_post_use,
+                   data = monthly_counts %>% drop_na(n),
+                   zi=~token+month_f,
+                   family = 'nbinom2')
+toc()
+save(m_m_zinb3_1, file = path(data_path, version, 'models', 'm_m_zinb3_1.RData'))
+summary(m_m_zinb3_1)
+tic()
+m_m_zinb3_2 <- glmmTMB(n ~ 
+                     #token +
+                     (1|token) +
+                     month_f +
+                     lwz_post_use,
+                   data = monthly_counts %>% drop_na(n),
+                   zi=~(1|token)+month_f,
+                   family = 'nbinom2')
+toc()
+save(m_m_zinb3_2, file = path(data_path, version, 'models', 'm_m_zinb3_2.RData'))
+summary(m_m_zinb3_2)
+tic()
+m_w_zinb3_1 <- glmmTMB(n ~ 
+                         token +
+                         #(1|token) +
+                         #month_f +
+                         week +
+                         #week_f +
+                         lwz_post_use,
+                   data = weekly_counts,
+                   zi=~token+week,
+                   family = 'nbinom2')
+toc()
+save(m_w_zinb3_1, file = path(data_path, version, 'models', 'm_w_zinb3_1.RData'))
+summary(m_w_zinb3_1)
+tic()
+m_w_zinb3_2 <- glmmTMB(n ~ 
+                         token +
+                         #(1|token) +
+                         #month_f +
+                         week_f +
+                         lwz_post_use,
+                   data = weekly_counts,
+                   zi=~token+week_f,
+                   family = 'nbinom2')
+toc() # ~45 min
+save(m_w_zinb3_2, file = path(data_path, version, 'models', 'm_w_zinb3_2.RData'))
+summary(m_w_zinb3_2)
+tic()
+m_w_zinb3_3 <- glmmTMB(n ~ 
+                         #token +
+                         (1|token) +
+                         #month_f +
+                         week_f +
+                         lwz_post_use,
+                   data = weekly_counts,
+                   zi=~(1|token)+week_f,
+                   family = 'nbinom2')
+toc()
+save(m_w_zinb3_3, file = path(data_path, version, 'models', 'm_w_zinb3_3.RData'))
+summary(m_w_zinb3_3)
+```
+
+```{r monthly zeroinfl}
+if (file_test('-f', model_path('m_m_zinb1_1'))) {
+  load(model_path('m_m_zinb1_1'))
+} else {
+  tic()
+  m_m_zinb1_1 <- zeroinfl(n ~ token + month_f + lwz_post_use | token + month_f,
+                          data = monthly_counts  %>% drop_na(n),
+                          dist = "negbin")
+  exec_time <- toc(quiet = T) # ~ 4:30 min
+  m_m_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_zinb1_1$AIC <- AIC(m_m_zinb1_1)
+  m_m_zinb1_1$BIC <- BIC(m_m_zinb1_1)
+  m_m_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_zinb1_1, cluster = ~ token)))
+  m_m_zinb1_1$cluster.se.count <- m_m_zinb1_1$cluster.se[grepl('^count_', names(m_m_zinb1_1$cluster.se))]
+  names(m_m_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_zinb1_1$SE.theta <- exp(m_m_zinb1_1$SE.logtheta)
+  save(m_m_zinb1_1, file = model_path('m_m_zinb1_1'))
+}
+
+if (file_test('-f', model_path('m_m_zinb1_2'))) {
+  load(model_path('m_m_zinb1_2'))
+} else {
+  tic()
+  m_m_zinb1_2 <- zeroinfl(n ~ token + month_f + lwz_post_use | token,
+                          data = monthly_counts  %>% drop_na(n),
+                          dist = "negbin")
+  exec_time <- toc(quiet = T) # ~ 4:30 min
+  m_m_zinb1_2$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_zinb1_2$AIC <- AIC(m_m_zinb1_2)
+  m_m_zinb1_2$BIC <- BIC(m_m_zinb1_2)
+  m_m_zinb1_2$cluster.se <- sqrt(diag(vcovCL(m_m_zinb1_2, cluster = ~ token)))
+  m_m_zinb1_2$cluster.se.count <- m_m_zinb1_2$cluster.se[grepl('^count_', names(m_m_zinb1_2$cluster.se))]
+  names(m_m_zinb1_2$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_zinb1_2$SE.theta <- exp(m_m_zinb1_2$SE.logtheta)
+  save(m_m_zinb1_2, file = model_path('m_m_zinb1_2'))
+}
+
+# Poisson
+if (file_test('-f', model_path('m_m_zip1_1'))) {
+  load(model_path('m_m_zip1_1'))
+} else {
+  tic()
+  m_m_zip1_1 <- zeroinfl(n ~ token + month_f + lwz_post_use | token + month_f,
+                         data = monthly_counts %>% drop_na(n),
+                         dist = "poisson")
+  exec_time <- toc(quiet = T)
+  m_m_zip1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_zip1_1$AIC <- AIC(m_m_zip1_1)
+  m_m_zip1_1$BIC <- BIC(m_m_zip1_1)
+  m_m_zip1_1$cluster.se <- sqrt(diag(vcovCL(m_m_zip1_1, cluster = ~ token)))
+  m_m_zip1_1$cluster.se.count <- m_m_zip1_1$cluster.se[grepl('^count_', names(m_m_zip1_1$cluster.se))]
+  names(m_m_zip1_1$cluster.se.count) %<>% str_replace('^count_','')
+  save(m_m_zip1_1, file = model_path('m_m_zip1_1'))
+}
+
+# Hurdle
+if (file_test('-f', model_path('m_m_hnb1_1'))) {
+  load(model_path('m_m_hnb1_1'))
+} else {
+  tic()
+  m_m_hnb1_1 <- hurdle(n ~ token + month_f + lwz_post_use | token + month_f,
+                       data = monthly_counts %>% drop_na(n),
+                       dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_hnb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_hnb1_1$AIC <- AIC(m_m_hnb1_1)
+  m_m_hnb1_1$BIC <- BIC(m_m_hnb1_1)
+  m_m_hnb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_hnb1_1, cluster = ~ token)))
+  m_m_hnb1_1$cluster.se.count <- m_m_hnb1_1$cluster.se[grepl('^count_', names(m_m_hnb1_1$cluster.se))]
+  names(m_m_hnb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_hnb1_1$SE.theta <- exp(m_m_hnb1_1$SE.logtheta)
+  save(m_m_hnb1_1, file = model_path('m_m_hnb1_1'))
+}
+```
+
+### 5.2 Model selection
+#### Weekly
+```{r Model selection table weekly}
+stargazer(
+  m_w_nb_2, 
+  m_w_zinb1_3,
+  m_w_zinb1_4,
+  m_w_zinb1_6,
+  m_w_zinb1_5,
+  m_w_zip1_1,
+  m_w_hnb1_1,
+  se=list(
+    m_w_nb_2$cluster.se,
+    m_w_zinb1_3$cluster.se.count,
+    m_w_zinb1_4$cluster.se.count,
+    m_w_zinb1_6$cluster.se.count,
+    m_w_zinb1_5$cluster.se.count,
+    m_w_zip1_1$cluster.se.count,
+    m_w_hnb1_1$cluster.se.count
+    ),
+  keep = 'lwz_post_use', 
+  title = 'Comparison of weekly models',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Weekly count per subject'),
+  covariate.labels = '$\\delta$',
+  column.labels = c(NA,rep('NB', 4), 'Poisson', 'NB'),
+  notes = 'Fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #float.env = 'sidewaystable',
+  #font.size = 'scriptsize',
+  #label = 'tab:weekly_model_selection',
+  #out = path(tables_path, 'weekly-model-selection.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+Model 3 (2) or 4 (3): AIC or BIC? 3 has lower AIC, 4 has lower BIC
+They differ in zero model: 3 includes weeks factor while 4 only includes token
+
+```{r cleanup}
+rm(m_w_nb_1)
+rm(m_w_zinb1_4)
+rm(m_w_zinb1_6)
+rm(m_w_zinb1_5)
+rm(m_w_zip1_1)
+rm(m_w_hnb1_1)
+```
+
+#### Monthly
+```{r Model selection table monthly}
+stargazer(
+  m_m_nb,
+  m_m_zinb1_1,
+  m_m_zinb1_2,
+  m_m_zip1_1,
+  m_m_hnb1_1,
+  se=list(
+    m_m_nb$cluster.se,
+    m_m_zinb1_1$cluster.se.count,
+    m_m_zinb1_2$cluster.se.count,
+    m_m_zip1_1$cluster.se.count,
+    m_m_hnb1_1$cluster.se.count
+    ),
+  keep = 'lwz_post_use',
+  title = 'Comparison of monthly models',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Monthly count per subject'),
+  covariate.labels = '$\\delta$',
+  column.labels = c(NA,rep('NB', 2), 'Poisson', 'NB'),
+  notes = 'Fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:monthly_model_selection',
+  #out = path(tables_path, 'monthly-model-selection.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+1 zero-inflated NB with month factor in zero model is good, but hurdle model slightly better fit – but almost identical. Zero-inflated model is better fit theoretically, should therefore go with that.
+BIC of zero-inflated model is slightly higher than on simple NB model, but AIC is lower, and since BIC penalises coefficient number and that's not the primary interest here, AIC is preferred.
+
+```{r}
+rm(m_m_zinb1_2)
+rm(m_m_zip1_1)
+```
+
+### 5.3 Goodness-of-Fit measures
+#### Weekly models
+```{r}
+countreg::rootogram(m_w_nb_2)
+```
+
+```{r Rootogram m_w_zinb1_3}
+# Uncomment to export
+#tikz(path(figures_path, 'm_w_zinb1_3-rootogram.tex'),
+#     width = fw(0.48), height = fh(0.48),
+#     pointsize = 8)
+countreg::rootogram(m_w_zinb1_3, main = '', plot = F) %>% 
+  autoplot(fill = NA) +
+  theme_pubr() +
+  labs(x = 'Weekly count per subject')
+#dev.off()
+```
+
+```{r}
+countreg::qqrplot(m_w_nb_2)
+```
+
+```{r QQ plot m_w_zinb1_3}
+# Uncomment to export
+#png(path(figures_path, 'm_w_zinb1_3-qq.png'),
+#    width = fw(1), height = fh(1), units = 'in', res = 160,
+#    type = 'cairo',
+#    pointsize = 16, family = 'serif')
+old_par <- par(no.readonly = T)
+par(mar = c(4.5, 4, 0, 0))
+countreg::qqrplot(m_w_zinb1_3, main = '')
+par(old_par)
+#dev.off()
+```
+
+Residuals vs fitted are not very good for these models as they are ambiguous to interpret, so not executed
+```{r, eval=F}
+data.frame(residuals = m_w_nb_2$residuals, fitted = m_w_nb_2$fitted.values) %>% ggplot(aes(fitted, residuals)) + geom_point() + geom_smooth(method = 'lm')
+data.frame(residuals = m_w_zinb1_3$residuals, fitted = m_w_zinb1_3$fitted.values) %>% ggplot(aes(fitted, residuals)) + geom_point() + geom_smooth(method = 'lm')
+```
+
+Bacon decomposition cannot be used because the panel data is unbalanced
+```{r, eval=F}
+decomp <- bacon(n ~ lwz_post_use, data = weekly_counts, id_var = 'token', exec_time_var = 'week_f')
+```
+
+```{r cleanup}
+rm(m_w_nb_2)
+```
+
+#### Monthly models
+```{r}
+countreg::rootogram(m_m_nb)
+countreg::rootogram(m_m_hnb1_1)
+```
+```{r Rootogram m_m_zinb1_1}
+# Uncomment to export
+#tikz(path(figures_path, 'm_m_zinb1_1-rootogram.tex'),
+#     width = fw(0.48), height = fh(0.48),
+#     pointsize = 8)
+countreg::rootogram(m_m_zinb1_1, main = '', plot = F) %>% 
+  autoplot(fill = NA) +
+  theme_pubr() +
+  labs(x = 'Monthly count per subject')
+#dev.off()
+```
+
+```{r}
+countreg::qqrplot(m_m_nb)
+countreg::qqrplot(m_m_hnb1_1)
+```
+```{r QQ plot m_m_zinb1_1}
+# Uncomment to export
+#png(path(figures_path, 'm_m_zinb1_1-qq.png'),
+#    width = fw(1), height = fh(1), units = 'in', res = 160,
+#    type = 'cairo',
+#    pointsize = 16, family = 'serif')
+old_par <- par(no.readonly = T)
+par(mar = c(4.5, 4, 0, 0))
+countreg::qqrplot(m_m_zinb1_1, main = '')
+par(old_par)
+#dev.off()
+```
+
+```{r, eval=F}
+data.frame(residuals = m_m_nb$residuals, fitted = m_m_nb$fitted.values) %>% ggplot(aes(fitted, residuals)) + geom_point() + geom_smooth(method = 'lm')
+data.frame(residuals = m_m_zinb1_1$residuals, fitted = m_m_zinb1_1$fitted.values) %>% ggplot(aes(fitted, residuals)) + geom_point() + geom_smooth(method = 'lm')
+```
+
+```{r}
+decomp_m <- monthly_counts %>% mutate(month_num = as.numeric(month)) %>% bacon(n_complete ~ lwz_post_use, data = ., id_var = 'token', time_var = 'month_num')
+```
+```{r cleanup}
+rm(m_m_nb)
+rm(m_m_hnb1_1)
+```
+
+### 5.4 Cross-validation with other groups
+
+```{r}
+if (file_test('-f', model_path('m_w_zinb1_3_g2'))) {
+  load(model_path('m_w_zinb1_3_g2'))
+} else {
+  tic()
+  m_w_zinb1_3_g2 <- zeroinfl(n ~ token + week_f + lwz_post_use | token + week_f,
+                             data = weekly_counts %>% filter(group2),
+                             dist = "negbin")
+  exec_time <- toc(quiet = T) # ~ 35 min
+  m_w_zinb1_3_g2$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_3_g2$AIC <- AIC(m_w_zinb1_3_g2)
+  m_w_zinb1_3_g2$BIC <- BIC(m_w_zinb1_3_g2)
+  m_w_zinb1_3_g2$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_3_g2, cluster = ~ token)))
+  m_w_zinb1_3_g2$cluster.se.count <- m_w_zinb1_3_g2$cluster.se[grepl('^count_', names(m_w_zinb1_3_g2$cluster.se))]
+  names(m_w_zinb1_3_g2$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_3_g2$SE.theta <- exp(m_w_zinb1_3_g2$SE.logtheta)
+  save(m_w_zinb1_3_g2, file = model_path('m_w_zinb1_3_g2'))
+}
+
+if (file_test('-f', model_path('m_w_zinb1_3_g3'))) {
+  load(model_path('m_w_zinb1_3_g3'))
+} else {
+  tic()
+  m_w_zinb1_3_g3 <- zeroinfl(n ~ token + week_f + lwz_post_use | token + week_f,
+                             data = weekly_counts %>% filter(group3),
+                             dist = "negbin")
+  exec_time <- toc(quiet = T) # ~ 25 min
+  m_w_zinb1_3_g3$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_3_g3$AIC <- AIC(m_w_zinb1_3_g3)
+  m_w_zinb1_3_g3$BIC <- BIC(m_w_zinb1_3_g3)
+  m_w_zinb1_3_g3$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_3_g3, cluster = ~ token)))
+  m_w_zinb1_3_g3$cluster.se.count <- m_w_zinb1_3_g3$cluster.se[grepl('^count_', names(m_w_zinb1_3_g3$cluster.se))]
+  names(m_w_zinb1_3_g3$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_3_g3$SE.theta <- exp(m_w_zinb1_3_g3$SE.logtheta)
+  save(m_w_zinb1_3_g3, file = model_path('m_w_zinb1_3_g3'))
+}
+
+if (file_test('-f', model_path('m_w_zinb1_3_2018_2021'))) {
+  load(model_path('m_w_zinb1_3_2018_2021'))
+} else {
+  tic()
+  m_w_zinb1_3_2018_2021 <- zeroinfl(n ~ token + week_f + lwz_post_use | token + week_f,
+                                    data = weekly_counts %>% filter(year(week) >= 2018 & year(week) <= 2021),
+                                    dist = "negbin")
+  exec_time <- toc(quiet = T) # ~ 25 min
+  m_w_zinb1_3_2018_2021$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_3_2018_2021$AIC <- AIC(m_w_zinb1_3_2018_2021)
+  m_w_zinb1_3_2018_2021$BIC <- BIC(m_w_zinb1_3_2018_2021)
+  m_w_zinb1_3_2018_2021$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_3_2018_2021, cluster = ~ token)))
+  m_w_zinb1_3_2018_2021$cluster.se.count <- m_w_zinb1_3_2018_2021$cluster.se[grepl('^count_', names(m_w_zinb1_3_2018_2021$cluster.se))]
+  names(m_w_zinb1_3_2018_2021$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_3_2018_2021$SE.theta <- exp(m_w_zinb1_3_2018_2021$SE.logtheta)
+  save(m_w_zinb1_3_2018_2021, file = model_path('m_w_zinb1_3_2018_2021'))
+}
+
+if (file_test('-f', model_path('m_w_zinb1_3_g3_2018_2021'))) {
+  load(model_path('m_w_zinb1_3_g3_2018_2021'))
+} else {
+  tic()
+  m_w_zinb1_3_g3_2018_2021 <- zeroinfl(n ~ token + week_f + lwz_post_use | token + week_f,
+                                       data = weekly_counts %>% filter(group3 & year(week) >= 2018 & year(week) <= 2021),
+                                       dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_w_zinb1_3_g3_2018_2021$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_3_g3_2018_2021$AIC <- AIC(m_w_zinb1_3_g3_2018_2021)
+  m_w_zinb1_3_g3_2018_2021$BIC <- BIC(m_w_zinb1_3_g3_2018_2021)
+  m_w_zinb1_3_g3_2018_2021$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_3_g3_2018_2021, cluster = ~ token)))
+  m_w_zinb1_3_g3_2018_2021$cluster.se.count <- m_w_zinb1_3_g3_2018_2021$cluster.se[grepl('^count_', names(m_w_zinb1_3_g3_2018_2021$cluster.se))]
+  names(m_w_zinb1_3_g3_2018_2021$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_3_g3_2018_2021$SE.theta <- exp(m_w_zinb1_3_g3_2018_2021$SE.logtheta)
+  save(m_w_zinb1_3_g3_2018_2021, file = model_path('m_w_zinb1_3_g3_2018_2021'))
+}
+
+if (file_test('-f', model_path('m_w_zinb1_3_g3_2018_2022'))) {
+  load(model_path('m_w_zinb1_3_g3_2018_2022'))
+} else {
+  tic()
+  m_w_zinb1_3_g3_2018_2022 <- zeroinfl(n ~ token + week_f + lwz_post_use | token + week_f,
+                                       data = weekly_counts %>% filter(group3 & year(week) >= 2018 & year(week) <= 2022),
+                                       dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_w_zinb1_3_g3_2018_2022$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_zinb1_3_g3_2018_2022$AIC <- AIC(m_w_zinb1_3_g3_2018_2022)
+  m_w_zinb1_3_g3_2018_2022$BIC <- BIC(m_w_zinb1_3_g3_2018_2022)
+  m_w_zinb1_3_g3_2018_2022$cluster.se <- sqrt(diag(vcovCL(m_w_zinb1_3_g3_2018_2022, cluster = ~ token)))
+  m_w_zinb1_3_g3_2018_2022$cluster.se.count <- m_w_zinb1_3_g3_2018_2022$cluster.se[grepl('^count_', names(m_w_zinb1_3_g3_2018_2022$cluster.se))]
+  names(m_w_zinb1_3_g3_2018_2022$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_zinb1_3_g3_2018_2022$SE.theta <- exp(m_w_zinb1_3_g3_2018_2022$SE.logtheta)
+  save(m_w_zinb1_3_g3_2018_2022, file = model_path('m_w_zinb1_3_g3_2018_2022'))
+}
+```
+
+```{r Crossvalidation table weekly}
+stargazer(
+  m_w_zinb1_3,
+  m_w_zinb1_3_g2,
+  m_w_zinb1_3_g3,
+  #m_w_zinb1_3_2018_2021,
+  m_w_zinb1_3_g3_2018_2021,
+  #m_w_zinb1_3_g3_2018_2022,
+  se=list(
+    m_w_zinb1_3$cluster.se.count,
+    m_w_zinb1_3_g2$cluster.se.count,
+    m_w_zinb1_3_g3$cluster.se.count,
+    #m_w_zinb1_3_2018_2021$cluster.se.count,
+    m_w_zinb1_3_g3_2018_2021$cluster.se.count#,
+    #m_w_zinb1_3_g3_2018_2022$cluster.se.count
+    ),
+  keep = 'lwz_post_use', 
+  title = 'Cross-validation of weekly models with other comparison groups',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Weekly count per subject'),
+  covariate.labels = '$\\delta$',
+  column.labels = c(rep('Group', 4)),
+  model.names = F,
+  notes = 'Fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:weekly_crossval',
+  #out = path(tables_path, 'weekly-crossval.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+
+```{r cleanup}
+rm(m_w_zinb1_3)
+rm(m_w_zinb1_3_g2)
+rm(m_w_zinb1_3_g3)
+rm(m_w_zinb1_3_2018_2021)
+rm(m_w_zinb1_3_g3_2018_2021)
+rm(m_w_zinb1_3_g3_2018_2022)
+```
+
+#### Monthly
+```{r}
+if (file_test('-f', model_path('m_m_zinb1_1_g2'))) {
+  load(model_path('m_m_zinb1_1_g2'))
+} else {
+  tic()
+  m_m_zinb1_1_g2 <- zeroinfl(n ~ token + month_f + lwz_post_use | token + month_f,
+                                       data = monthly_counts %>% drop_na(n) %>% filter(group2),
+                                       dist = 'negbin')
+  exec_time <- toc(quiet = T)
+  m_m_zinb1_1_g2$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_zinb1_1_g2$AIC <- AIC(m_m_zinb1_1_g2)
+  m_m_zinb1_1_g2$BIC <- BIC(m_m_zinb1_1_g2)
+  m_m_zinb1_1_g2$cluster.se <- sqrt(diag(vcovCL(m_m_zinb1_1_g2, cluster = ~ token)))
+  m_m_zinb1_1_g2$cluster.se.count <- m_m_zinb1_1_g2$cluster.se[grepl('^count_', names(m_m_zinb1_1_g2$cluster.se))]
+  names(m_m_zinb1_1_g2$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_zinb1_1_g2$SE.theta <- exp(m_m_zinb1_1_g2$SE.logtheta)
+  save(m_m_zinb1_1_g2, file = model_path('m_m_zinb1_1_g2'))
+}
+
+if (file_test('-f', model_path('m_m_zinb1_1_g3'))) {
+  load(model_path('m_m_zinb1_1_g3'))
+} else {
+  tic()
+  m_m_zinb1_1_g3 <- zeroinfl(n ~ token + month_f + lwz_post_use | token + month_f,
+                             data = monthly_counts %>% drop_na(n) %>% filter(group3),
+                             dist = 'negbin')
+  exec_time <- toc(quiet = T)
+  m_m_zinb1_1_g3$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_zinb1_1_g3$AIC <- AIC(m_m_zinb1_1_g3)
+  m_m_zinb1_1_g3$BIC <- BIC(m_m_zinb1_1_g3)
+  m_m_zinb1_1_g3$cluster.se <- sqrt(diag(vcovCL(m_m_zinb1_1_g3, cluster = ~ token)))
+  m_m_zinb1_1_g3$cluster.se.count <- m_m_zinb1_1_g3$cluster.se[grepl('^count_', names(m_m_zinb1_1_g3$cluster.se))]
+  names(m_m_zinb1_1_g3$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_zinb1_1_g3$SE.theta <- exp(m_m_zinb1_1_g3$SE.logtheta)
+  save(m_m_zinb1_1_g3, file = model_path('m_m_zinb1_1_g3'))
+}
+
+if (file_test('-f', model_path('m_m_zinb1_1_g3_2018_2021'))) {
+  load(model_path('m_m_zinb1_1_g3_2018_2021'))
+} else {
+  tic()
+  m_m_zinb1_1_g3_2018_2021 <- zeroinfl(n ~ token + month_f + lwz_post_use | token + month_f,
+                                       data = monthly_counts %>% drop_na(n) %>% filter(group3 & year(month) >= 2018 & year(month) <= 2021),
+                                       dist = 'negbin')
+  exec_time <- toc(quiet = T)
+  m_m_zinb1_1_g3_2018_2021$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_zinb1_1_g3_2018_2021$AIC <- AIC(m_m_zinb1_1_g3_2018_2021)
+  m_m_zinb1_1_g3_2018_2021$BIC <- BIC(m_m_zinb1_1_g3_2018_2021)
+  m_m_zinb1_1_g3_2018_2021$cluster.se <- sqrt(diag(vcovCL(m_m_zinb1_1_g3_2018_2021, cluster = ~ token)))
+  m_m_zinb1_1_g3_2018_2021$cluster.se.count <- m_m_zinb1_1_g3_2018_2021$cluster.se[grepl('^count_', names(m_m_zinb1_1_g3_2018_2021$cluster.se))]
+  names(m_m_zinb1_1_g3_2018_2021$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_zinb1_1_g3_2018_2021$SE.theta <- exp(m_m_zinb1_1_g3_2018_2021$SE.logtheta)
+  save(m_m_zinb1_1_g3_2018_2021, file = model_path('m_m_zinb1_1_g3_2018_2021'))
+}
+
+if (file_test('-f', model_path('mc_m_zinb1_1'))) {
+  load(model_path('mc_m_zinb1_1'))
+} else {
+  tic()
+  mc_m_zinb1_1 <- zeroinfl(n_complete ~ token + month_f + lwz_post_use | token,
+                                       data = monthly_counts,
+                                       dist = 'negbin')
+  exec_time <- toc(quiet = T)
+  mc_m_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  mc_m_zinb1_1$AIC <- AIC(mc_m_zinb1_1)
+  mc_m_zinb1_1$BIC <- BIC(mc_m_zinb1_1)
+  mc_m_zinb1_1$cluster.se <- sqrt(diag(vcovCL(mc_m_zinb1_1, cluster = ~ token)))
+  mc_m_zinb1_1$cluster.se.count <- mc_m_zinb1_1$cluster.se[grepl('^count_', names(mc_m_zinb1_1$cluster.se))]
+  names(mc_m_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  mc_m_zinb1_1$SE.theta <- exp(mc_m_zinb1_1$SE.logtheta)
+  save(mc_m_zinb1_1, file = model_path('mc_m_zinb1_1'))
+}
+
+# Hurdle
+if (file_test('-f', model_path('m_m_hnb1_1_g3_2018_2021'))) {
+  load(model_path('m_m_hnb1_1_g3_2018_2021'))
+} else {
+  tic()
+  m_m_hnb1_1_g3_2018_2021 <- hurdle(n ~ token + month_f + lwz_post_use | token + month_f,
+                                    data = monthly_counts  %>% drop_na(n) %>% filter(group3 & year(month) >= 2018 & year(month) <= 2021),
+                                    dist = 'negbin')
+  exec_time <- toc(quiet = T)
+  m_m_hnb1_1_g3_2018_2021$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_hnb1_1_g3_2018_2021$AIC <- AIC(m_m_hnb1_1_g3_2018_2021)
+  m_m_hnb1_1_g3_2018_2021$BIC <- BIC(m_m_hnb1_1_g3_2018_2021)
+  m_m_hnb1_1_g3_2018_2021$cluster.se <- sqrt(diag(vcovCL(m_m_hnb1_1_g3_2018_2021, cluster = ~ token)))
+  m_m_hnb1_1_g3_2018_2021$cluster.se.count <- m_m_hnb1_1_g3_2018_2021$cluster.se[grepl('^count_', names(m_m_hnb1_1_g3_2018_2021$cluster.se))]
+  names(m_m_hnb1_1_g3_2018_2021$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_hnb1_1_g3_2018_2021$SE.theta <- exp(m_m_hnb1_1_g3_2018_2021$SE.logtheta)
+  save(m_m_hnb1_1_g3_2018_2021, file = model_path('m_m_hnb1_1_g3_2018_2021'))
+}
+```
+
+```{r Crossvalidation table monthly}
+stargazer(
+  m_m_zinb1_1,
+  m_m_zinb1_1_g2,
+  m_m_zinb1_1_g3,
+  m_m_zinb1_1_g3_2018_2021,
+  #m_m_hnb1_1_g3_2018_2021,
+  mc_m_zinb1_1,
+  se=list(
+    m_m_zinb1_1$cluster.se.count,
+    m_m_zinb1_1_g2$cluster.se.count,
+    m_m_zinb1_1_g3$cluster.se.count,
+    m_m_zinb1_1_g3_2018_2021$cluster.se.count,
+    #m_m_hnb1_1_g3_2018_2021$cluster.se.count,
+    mc_m_zinb1_1$cluster.se.count
+    ),
+  keep = 'lwz_post_use', 
+  title = 'Cross-validation of monthly models with other comparison groups',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Monthly count per subject', 'Balanced panel'),
+  covariate.labels = '$\\delta$',
+  column.labels = c(rep('Group', 4), NA),
+  model.names = F,
+  notes = 'Fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:monthly_crossval',
+  #out = path(tables_path, 'monthly_crossval.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+
+```{r}
+countreg::rootogram(mc_m_zinb1_1)
+countreg::qqrplot(mc_m_zinb1_1)
+```
+
+```{r cleanup}
+rm(m_m_zinb1_1)
+rm(m_m_zinb1_1_g2)
+rm(m_m_zinb1_1_g3)
+rm(m_m_zinb1_1_g3_2018_2021)
+rm(m_m_hnb1_1_g3_2018_2021)
+rm(mc_m_zinb1_1)
+```
+
+## 6 Interaction with socio-demographics
+### 6.1 Gender
+```{r}
+weekly_counts %>% 
+  filter(gender %in% c('male', 'female')) %>% 
+  filter(year(week) >= 2018 & year(week) <= 2021) %>% 
+  group_by(week, lwz_ever, gender) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  { (
+      (ggplot(.) + geom_step(aes(week, sum, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))) + facet_grid( ~ gender))
+    ) /
+    (
+      (ggplot(.) + geom_step(aes(week, mean, linetype = lwz_ever)) + geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'week'))) + facet_grid( ~ gender))
+    )
+  }
+```
+```{r}
+weekly_counts %>% 
+  filter(gender %in% c('male', 'female')) %>% 
+  filter(year(week) >= 2018 & year(week) <= 2021) %>% 
+  count(week, lwz_ever, gender) %>% 
+  ggplot(aes(week, n, linetype = gender)) + geom_line() + facet_grid(~lwz_ever)
+```
+```{r, eval=F}
+# trial: change outcome variable to potential cofounder (Wing et al. 2018) - but does not converge
+m_gender_test <- glm(gender_male ~ token + week_f + lwz_post_use,
+                     data = weekly_counts %>% filter(gender %in% c('male','female')) %>% mutate(gender_male = gender == 'male'),
+                     family = "binomial")
+summary(m_gender_test)
+```
+
+#### Weekly
+```{r}
+with(weekly_counts,table(n>0, gender))
+with(weekly_counts,table(lwz_post_use, gender))
+```
+
+```{r}
+if (file_test('-f', model_path('m_w_gender_zinb1_1'))) {
+  load(model_path('m_w_gender_zinb1_1'))
+} else {
+  tic()
+  m_w_gender_zinb1_1 <- zeroinfl(n ~ token + week_f + gender +
+                                   lwz_post_use + week_f:gender + #token:gender +
+                                   lwz_post_use:gender |
+                                   token + week_f,
+                                 data = weekly_counts,
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_w_gender_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_gender_zinb1_1$AIC <- AIC(m_w_gender_zinb1_1)
+  m_w_gender_zinb1_1$BIC <- BIC(m_w_gender_zinb1_1)
+  m_w_gender_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_w_gender_zinb1_1, cluster = ~ token)))
+  m_w_gender_zinb1_1$cluster.se.count <- m_w_gender_zinb1_1$cluster.se[grepl('^count_', names(m_w_gender_zinb1_1$cluster.se))]
+  names(m_w_gender_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_gender_zinb1_1$SE.theta <- exp(m_w_gender_zinb1_1$SE.logtheta)
+  save(m_w_gender_zinb1_1, file = model_path('m_w_gender_zinb1_1'))
+}
+
+if (file_test('-f', model_path('m_w_gender_zinb1_1_g3_2018_2021'))) {
+  load(model_path('m_w_gender_zinb1_1_g3_2018_2021'))
+} else {
+  tic()
+  m_w_gender_zinb1_1_g3_2018_2021 <- zeroinfl(n ~ token + week_f + gender +
+                                                lwz_post_use + week_f:gender + #token:gender +
+                                                lwz_post_use:gender |
+                                                token + week_f,
+                                              data = weekly_counts %>% filter(group3 & year(week) >= 2018 & year(week) <= 2021),
+                                              dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_w_gender_zinb1_1_g3_2018_2021$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_gender_zinb1_1_g3_2018_2021$AIC <- AIC(m_w_gender_zinb1_1_g3_2018_2021)
+  m_w_gender_zinb1_1_g3_2018_2021$BIC <- BIC(m_w_gender_zinb1_1_g3_2018_2021)
+  m_w_gender_zinb1_1_g3_2018_2021$cluster.se <- sqrt(diag(vcovCL(m_w_gender_zinb1_1_g3_2018_2021, cluster = ~ token)))
+  m_w_gender_zinb1_1_g3_2018_2021$cluster.se.count <- m_w_gender_zinb1_1_g3_2018_2021$cluster.se[grepl('^count_', names(m_w_gender_zinb1_1_g3_2018_2021$cluster.se))]
+  names(m_w_gender_zinb1_1_g3_2018_2021$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_gender_zinb1_1_g3_2018_2021$SE.theta <- exp(m_w_gender_zinb1_1_g3_2018_2021$SE.logtheta)
+  save(m_w_gender_zinb1_1_g3_2018_2021, file = model_path('m_w_gender_zinb1_1_g3_2018_2021'))
+}
+```
+```{r Table of initial DDD without SEs}
+stargazer(
+  m_w_gender_zinb1_1,
+  m_w_gender_zinb1_1_g3_2018_2021,
+  se=list(
+    m_w_gender_zinb1_1$cluster.se.count,
+    m_w_gender_zinb1_1_g3_2018_2021$cluster.se.count
+    ),
+  keep = c('lwz_post_use', '^genderfemale$', '^genderother$'),
+  title = 'Initial DDD weekly model (Gender) without coefficient standard errors',
+  style = 'apsr',
+  ci = F,
+  single.row = T,
+  dep.var.labels = 'Weekly count per subject',
+  covariate.labels = c('Gender: female', 'Gender: other', '$\\delta_1$', '$\\delta_4$ : female', '$\\delta_4$ : other'),
+  model.names = F,
+  keep.stat = c('n', 'theta'),
+  notes = 'Other fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:weekly_gender_DDD_fail',
+  #out = path(tables_path, 'weekly-gender-DDD-fail.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+```{r cleanup}
+rm(m_w_gender_zinb1_1)
+rm(m_w_gender_zinb1_1_g3_2018_2021)
+```
+
+##### Comparative
+```{r}
+if (file_test('-f', model_path('m_w_gender_male_zinb1_1'))) {
+  load(model_path('m_w_gender_male_zinb1_1'))
+} else {
+  tic()
+  m_w_gender_male_zinb1_1 <- zeroinfl(n ~ token + week_f + 
+                                   lwz_post_use |
+                                   token,
+                                 data = weekly_counts %>% drop_na(n) %>% filter(gender == 'male'),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_w_gender_male_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_gender_male_zinb1_1$AIC <- AIC(m_w_gender_male_zinb1_1)
+  m_w_gender_male_zinb1_1$BIC <- BIC(m_w_gender_male_zinb1_1)
+  m_w_gender_male_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_w_gender_male_zinb1_1, cluster = ~ token)))
+  m_w_gender_male_zinb1_1$cluster.se.count <- m_w_gender_male_zinb1_1$cluster.se[grepl('^count_', names(m_w_gender_male_zinb1_1$cluster.se))]
+  names(m_w_gender_male_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_gender_male_zinb1_1$SE.theta <- exp(m_w_gender_male_zinb1_1$SE.logtheta)
+  save(m_w_gender_male_zinb1_1, file = model_path('m_w_gender_male_zinb1_1'))
+}
+if (file_test('-f', model_path('m_w_gender_female_zinb1_1'))) {
+  load(model_path('m_w_gender_female_zinb1_1'))
+} else {
+  tic()
+  m_w_gender_female_zinb1_1 <- zeroinfl(n ~ token + week_f + 
+                                   lwz_post_use |
+                                   token,
+                                 data = weekly_counts %>% drop_na(n) %>% filter(gender == 'female'),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_w_gender_female_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_w_gender_female_zinb1_1$AIC <- AIC(m_w_gender_female_zinb1_1)
+  m_w_gender_female_zinb1_1$BIC <- BIC(m_w_gender_female_zinb1_1)
+  m_w_gender_female_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_w_gender_female_zinb1_1, cluster = ~ token)))
+  m_w_gender_female_zinb1_1$cluster.se.count <- m_w_gender_female_zinb1_1$cluster.se[grepl('^count_', names(m_w_gender_female_zinb1_1$cluster.se))]
+  names(m_w_gender_female_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_w_gender_female_zinb1_1$SE.theta <- exp(m_w_gender_female_zinb1_1$SE.logtheta)
+  save(m_w_gender_female_zinb1_1, file = model_path('m_w_gender_female_zinb1_1'))
+}
+```
+```{r}
+stargazer(
+  m_w_gender_male_zinb1_1,
+  m_w_gender_female_zinb1_1,
+  se=list(
+    m_w_gender_male_zinb1_1$cluster.se.count,
+    m_w_gender_female_zinb1_1$cluster.se.count
+    ),
+  keep = c('lwz_post_use', '^topincTRUE$'),
+  ci = T,
+  type = 'text')
+```
+```{r cleanup}
+rm(m_w_gender_male_zinb1_1)
+rm(m_w_gender_female_zinb1_1)
+```
+
+#### Monthly
+```{r Figure trend by gender}
+# Uncomment to export
+#tikz(path(figures_path, 'trend-gender.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+monthly_counts %>% 
+  filter(gender %in% c('male', 'female')) %>% 
+  #filter(year(month) >= 2018 & year(month) <= 2021) %>% 
+  drop_na(n) %>% 
+  group_by(month, lwz_ever, gender) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  mutate(lwzever = ifelse(lwz_ever, 'Treated', 'Control')) %>% 
+  { (
+      ggplot(.) +
+        geom_step(aes(month, sum, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ gender) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(name='',
+                        breaks = c('Treated', 'Control', 'Intervention'),
+                        values = c('Treated' = 'solid', 'Control' = '22', 'Intervention' = 'dotted')) +
+        theme(axis.title.x = element_blank())
+    ) /
+    (
+      ggplot(.) +
+        geom_step(aes(month, mean, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ gender) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(values = c('Treated' = 'solid', 'Control' = '22')) +
+        theme(legend.position = 'none',
+              axis.title.x = element_blank())
+    )
+  }
+#dev.off()
+```
+
+```{r}
+if (file_test('-f', model_path('m_m_gender_zinb1_1'))) {
+  load(model_path('m_m_gender_zinb1_1'))
+} else {
+  tic()
+  m_m_gender_zinb1_1 <- zeroinfl(n ~ token + month_f + #gender +
+                                   lwz_post_use + month_f:gender + #token:gender +
+                                   lwz_post_use:gender |
+                                   token + month_f,
+                                 data = monthly_counts %>% drop_na(n),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_gender_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_gender_zinb1_1$AIC <- AIC(m_m_gender_zinb1_1)
+  m_m_gender_zinb1_1$BIC <- BIC(m_m_gender_zinb1_1)
+  m_m_gender_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_gender_zinb1_1, cluster = ~ token)))
+  m_m_gender_zinb1_1$cluster.se.count <- m_m_gender_zinb1_1$cluster.se[grepl('^count_', names(m_m_gender_zinb1_1$cluster.se))]
+  names(m_m_gender_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_gender_zinb1_1$SE.theta <- exp(m_m_gender_zinb1_1$SE.logtheta)
+  save(m_m_gender_zinb1_1, file = model_path('m_m_gender_zinb1_1'))
+}
+
+if (file_test('-f', model_path('m_m_gender_zinb1_2'))) {
+  load(model_path('m_m_gender_zinb1_2'))
+} else {
+  tic()
+  m_m_gender_zinb1_2 <- zeroinfl(n_complete ~ token + month_f + gender +
+                                   lwz_post_use + #month_f:gender + #token:gender +
+                                   lwz_post_use:gender |
+                                   token,
+                                 data = monthly_counts %>%
+                                   #drop_na(n) %>%
+                                   filter(gender %in% c('male', 'female')) %>%
+                                   filter(group3) %>% 
+                                   #filter(year(month) >= 2018 & year(month) <= 2021) %>% 
+                                   group_by(token) %>% filter(sum(n_complete) > 14 & sum(n_complete) < 2500),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_gender_zinb1_2$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_gender_zinb1_2$AIC <- AIC(m_m_gender_zinb1_2)
+  m_m_gender_zinb1_2$BIC <- BIC(m_m_gender_zinb1_2)
+  m_m_gender_zinb1_2$cluster.se <- sqrt(diag(vcovCL(m_m_gender_zinb1_2, cluster = ~ token)))
+  m_m_gender_zinb1_2$cluster.se.count <- m_m_gender_zinb1_2$cluster.se[grepl('^count_', names(m_m_gender_zinb1_2$cluster.se))]
+  names(m_m_gender_zinb1_2$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_gender_zinb1_2$SE.theta <- exp(m_m_gender_zinb1_2$SE.logtheta)
+  save(m_m_gender_zinb1_2, file = model_path('m_m_gender_zinb1_2'))
+}
+
+if (file_test('-f', model_path('m_m_gender_zinb1_1_g3_2018_2021'))) {
+  load(model_path('m_m_gender_zinb1_1_g3_2018_2021'))
+} else {
+  tic()
+  m_m_gender_zinb1_1_g3_2018_2021 <- zeroinfl(n ~ token + month_f + gender +
+                                                lwz_post_use + month_f:gender + #token:gender +
+                                                lwz_post_use:gender |
+                                                token + month_f,
+                                              data = monthly_counts  %>% drop_na(n) %>% filter(group3 & year(month) >= 2018 & year(month) <= 2021),
+                                              dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_gender_zinb1_1_g3_2018_2021$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_gender_zinb1_1_g3_2018_2021$AIC <- AIC(m_m_gender_zinb1_1_g3_2018_2021)
+  m_m_gender_zinb1_1_g3_2018_2021$BIC <- BIC(m_m_gender_zinb1_1_g3_2018_2021)
+  m_m_gender_zinb1_1_g3_2018_2021$cluster.se <- sqrt(diag(vcovCL(m_m_gender_zinb1_1_g3_2018_2021, cluster = ~ token)))
+  m_m_gender_zinb1_1_g3_2018_2021$cluster.se.count <- m_m_gender_zinb1_1_g3_2018_2021$cluster.se[grepl('^count_', names(m_m_gender_zinb1_1_g3_2018_2021$cluster.se))]
+  names(m_m_gender_zinb1_1_g3_2018_2021$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_gender_zinb1_1_g3_2018_2021$SE.theta <- exp(m_m_gender_zinb1_1_g3_2018_2021$SE.logtheta)
+  save(m_m_gender_zinb1_1_g3_2018_2021, file = model_path('m_m_gender_zinb1_1_g3_2018_2021'))
+}
+
+if (file_test('-f', model_path('mc_m_gender_zinb1_1'))) {
+  load(model_path('mc_m_gender_zinb1_1'))
+} else {
+  tic()
+  mc_m_gender_zinb1_1 <- zeroinfl(n_complete ~ token + month_f + gender +
+                                   lwz_post_use + month_f:gender + token:gender +
+                                   lwz_post_use:gender |
+                                   month_f,
+                                 data = monthly_counts,
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  mc_m_gender_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  mc_m_gender_zinb1_1$AIC <- AIC(mc_m_gender_zinb1_1)
+  mc_m_gender_zinb1_1$BIC <- BIC(mc_m_gender_zinb1_1)
+  mc_m_gender_zinb1_1$cluster.se <- sqrt(diag(vcovCL(mc_m_gender_zinb1_1, cluster = ~ token)))
+  mc_m_gender_zinb1_1$cluster.se.count <- mc_m_gender_zinb1_1$cluster.se[grepl('^count_', names(mc_m_gender_zinb1_1$cluster.se))]
+  names(mc_m_gender_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  mc_m_gender_zinb1_1$SE.theta <- exp(mc_m_gender_zinb1_1$SE.logtheta)
+  save(mc_m_gender_zinb1_1, file = model_path('mc_m_gender_zinb1_1'))
+}
+```
+```{r}
+#stargazer(m_m_gender_zinb1_2, keep = c('lwz_post_use', '^genderfemale$', '^genderother$'), type = 'text')
+stargazer(
+  m_m_gender_zinb1_1,
+  m_m_gender_zinb1_1_g3_2018_2021,
+  mc_m_gender_zinb1_1,
+  se=list(
+    m_m_gender_zinb1_1$cluster.se.count,
+    m_m_gender_zinb1_1_g3_2018_2021$cluster.se.count,
+    mc_m_gender_zinb1_1$cluster.se.count
+    ),
+  keep = c('lwz_post_use', '^genderfemale$', '^genderother$'),
+  ci = T,
+  title = 'DDD monthly model: Gender',
+  type = 'text'
+)
+```
+```{r cleanup}
+rm(m_m_gender_zinb1_1)
+rm(m_m_gender_zinb1_2)
+rm(m_m_gender_zinb1_1_g3_2018_2021)
+rm(mc_m_gender_zinb1_1)
+```
+
+##### Comparative
+```{r}
+if (file_test('-f', model_path('m_m_gender_male_zinb1_1'))) {
+  load(model_path('m_m_gender_male_zinb1_1'))
+} else {
+  tic()
+  m_m_gender_male_zinb1_1 <- zeroinfl(n ~ token + month_f + 
+                                   lwz_post_use |
+                                   token,
+                                 data = monthly_counts %>% drop_na(n) %>% filter(gender == 'male'),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_gender_male_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_gender_male_zinb1_1$AIC <- AIC(m_m_gender_male_zinb1_1)
+  m_m_gender_male_zinb1_1$BIC <- BIC(m_m_gender_male_zinb1_1)
+  m_m_gender_male_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_gender_male_zinb1_1, cluster = ~ token)))
+  m_m_gender_male_zinb1_1$cluster.se.count <- m_m_gender_male_zinb1_1$cluster.se[grepl('^count_', names(m_m_gender_male_zinb1_1$cluster.se))]
+  names(m_m_gender_male_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_gender_male_zinb1_1$SE.theta <- exp(m_m_gender_male_zinb1_1$SE.logtheta)
+  save(m_m_gender_male_zinb1_1, file = model_path('m_m_gender_male_zinb1_1'))
+}
+if (file_test('-f', model_path('m_m_gender_female_zinb1_1'))) {
+  load(model_path('m_m_gender_female_zinb1_1'))
+} else {
+  tic()
+  m_m_gender_female_zinb1_1 <- zeroinfl(n ~ token + month_f + 
+                                   lwz_post_use |
+                                   token,
+                                 data = monthly_counts %>% drop_na(n) %>% filter(gender == 'female'),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_gender_female_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_gender_female_zinb1_1$AIC <- AIC(m_m_gender_female_zinb1_1)
+  m_m_gender_female_zinb1_1$BIC <- BIC(m_m_gender_female_zinb1_1)
+  m_m_gender_female_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_gender_female_zinb1_1, cluster = ~ token)))
+  m_m_gender_female_zinb1_1$cluster.se.count <- m_m_gender_female_zinb1_1$cluster.se[grepl('^count_', names(m_m_gender_female_zinb1_1$cluster.se))]
+  names(m_m_gender_female_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_gender_female_zinb1_1$SE.theta <- exp(m_m_gender_female_zinb1_1$SE.logtheta)
+  save(m_m_gender_female_zinb1_1, file = model_path('m_m_gender_female_zinb1_1'))
+}
+```
+```{r}
+stargazer(
+  m_m_gender_male_zinb1_1,
+  m_m_gender_female_zinb1_1,
+  se=list(
+    m_m_gender_male_zinb1_1$cluster.se.count,
+    m_m_gender_female_zinb1_1$cluster.se.count
+    ),
+  keep = c('lwz_post_use'),
+  ci = T,
+  type = 'text')
+```
+
+#### Aggregated
+```{r}
+m_m_gender_mean <- 
+  monthly_counts %>%
+  drop_na(n_norm) %>% 
+  filter(gender %in% c('male','female')) %>% 
+  group_by(lwz_ever, gender, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + gender + lwz_post + month_f:gender + lwz_ever:gender + lwz_post:gender, data = .)
+m_m_gender_mean_g3_2018_2021 <- 
+  monthly_counts %>%
+  drop_na(n_norm) %>% 
+  filter(gender %in% c('male','female')) %>% 
+  filter(group3) %>% 
+  filter(year(month)>=2018 & year(month)<=2021) %>% filter(month != ymd('2018-01-01')) %>% 
+  group_by(lwz_ever, gender, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + gender + lwz_post + month_f:gender + lwz_ever:gender + lwz_post:gender, data = .) 
+```
+```{r}
+stargazer(
+  m_m_gender_mean,
+  m_m_gender_mean_g3_2018_2021,
+  keep = c('lwz_post', '^genderfemale$'),
+  ci = T,
+  type = 'text'
+)
+```
+```{r DDD Gender combined table}
+stargazer(
+  m_m_gender_male_zinb1_1,
+  m_m_gender_female_zinb1_1,
+  m_m_gender_mean,
+  m_m_gender_mean_g3_2018_2021,
+    se=list(
+    m_m_gender_male_zinb1_1$cluster.se.count,
+    m_m_gender_female_zinb1_1$cluster.se.count,
+    NULL, NULL
+    ),
+  keep = c('lwz_post', '^genderfemale$'),
+  single.row = T,
+  title = 'Gender: Comparative DD and DDD',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Monthly count per subject', 'Monthly aggregate count'),
+  covariate.labels = c('$\\delta$', 'Female', '$\\delta_1$', '$\\delta_4$'),
+  column.labels = c('Male', 'Female', 'Group 1', 'Group 4'),
+  notes = 'Other fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:dd_ddd_gender_combined',
+  #out = path(tables_path, 'dd-ddd-gender-combined.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+```{r cleanup}
+rm(m_m_gender_male_zinb1_1)
+rm(m_m_gender_female_zinb1_1)
+rm(m_m_gender_mean)
+rm(m_m_gender_mean_g3_2018_2021)
+```
+
+### 6.2 Personal income
+Separated in top and bottom half of distribution
+```{r Figure trends persinc}
+# Uncomment to export
+#tikz(path(figures_path, 'trend-persinc.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+monthly_counts %>% 
+  drop_na(n) %>% 
+  mutate(top50 = ifelse(persinc %in% c("€ 1901 - € 2700", "€ 2701 - € 3700", "> € 3700"), 'Above median', 'Below median')) %>% 
+  mutate(top50 = factor(top50, levels = c('Below median', 'Above median'))) %>% 
+  group_by(month, lwz_ever, top50) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  mutate(lwzever = ifelse(lwz_ever, 'Treated', 'Control')) %>% 
+  { (
+      ggplot(.) +
+        geom_step(aes(month, sum, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ top50) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(name='',
+                        breaks = c('Treated', 'Control', 'Intervention'),
+                        values = c('Treated' = 'solid', 'Control' = '22', 'Intervention' = 'dotted')) +
+        theme(axis.title.x = element_blank())
+    ) /
+    (
+      ggplot(.) +
+        geom_step(aes(month, mean, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ top50) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(values = c('Treated' = 'solid', 'Control' = '22')) +
+        theme(legend.position = 'none',
+              axis.title.x = element_blank())
+    )
+  }
+#dev.off()
+```
+
+#### Monthly
+```{r}
+if (file_test('-f', model_path('m_m_persinc_top50_zinb1_1'))) {
+  load(model_path('m_m_persinc_top50_zinb1_1'))
+} else {
+  tic()
+  m_m_persinc_top50_zinb1_1 <- zeroinfl(n ~ token + month_f +
+                                   lwz_post_use |
+                                   token,
+                                 data = monthly_counts %>% drop_na(n) %>% 
+                                   filter(persinc %in% c("€ 1901 - € 2700", "€ 2701 - € 3700", "> € 3700")),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_persinc_top50_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_persinc_top50_zinb1_1$AIC <- AIC(m_m_persinc_top50_zinb1_1)
+  m_m_persinc_top50_zinb1_1$BIC <- BIC(m_m_persinc_top50_zinb1_1)
+  m_m_persinc_top50_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_persinc_top50_zinb1_1, cluster = ~ token)))
+  m_m_persinc_top50_zinb1_1$cluster.se.count <- m_m_persinc_top50_zinb1_1$cluster.se[grepl('^count_', names(m_m_persinc_top50_zinb1_1$cluster.se))]
+  names(m_m_persinc_top50_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_persinc_top50_zinb1_1$SE.theta <- exp(m_m_persinc_top50_zinb1_1$SE.logtheta)
+  save(m_m_persinc_top50_zinb1_1, file = model_path('m_m_persinc_top50_zinb1_1'))
+}
+if (file_test('-f', model_path('m_m_persinc_bottom50_zinb1_1'))) {
+  load(model_path('m_m_persinc_bottom50_zinb1_1'))
+} else {
+  tic()
+  m_m_persinc_bottom50_zinb1_1 <- zeroinfl(n ~ token + month_f +
+                                   lwz_post_use |
+                                   token,
+                                 data = monthly_counts %>% drop_na(n) %>% 
+                                   filter(!persinc %in% c("€ 1901 - € 2700", "€ 2701 - € 3700", "> € 3700")),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_persinc_bottom50_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_persinc_bottom50_zinb1_1$AIC <- AIC(m_m_persinc_bottom50_zinb1_1)
+  m_m_persinc_bottom50_zinb1_1$BIC <- BIC(m_m_persinc_bottom50_zinb1_1)
+  m_m_persinc_bottom50_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_persinc_bottom50_zinb1_1, cluster = ~ token)))
+  m_m_persinc_bottom50_zinb1_1$cluster.se.count <- m_m_persinc_bottom50_zinb1_1$cluster.se[grepl('^count_', names(m_m_persinc_bottom50_zinb1_1$cluster.se))]
+  names(m_m_persinc_bottom50_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_persinc_bottom50_zinb1_1$SE.theta <- exp(m_m_persinc_bottom50_zinb1_1$SE.logtheta)
+  save(m_m_persinc_bottom50_zinb1_1, file = model_path('m_m_persinc_bottom50_zinb1_1'))
+}
+```
+```{r}
+stargazer(
+  m_m_persinc_top50_zinb1_1,
+  m_m_persinc_bottom50_zinb1_1,
+  se=list(
+    m_m_persinc_top50_zinb1_1$cluster.se.count,
+    m_m_persinc_bottom50_zinb1_1$cluster.se.count
+    ),
+  keep = c('lwz_post_use', '^topincTRUE$'),
+  type = 'text')
+```
+
+#### Aggregated
+```{r}
+m_m_persinc_mean <- 
+  monthly_counts %>%
+  drop_na(n_norm) %>% 
+  mutate(top50 = persinc %in% c("€ 1901 - € 2700", "€ 2701 - € 3700", "> € 3700")) %>% 
+  group_by(lwz_ever, top50, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + top50 + lwz_post + month_f:top50 + lwz_ever:top50 + lwz_post:top50, data = .)
+m_m_persinc_mean_g3_2018_2021 <- 
+  monthly_counts %>%
+  drop_na(n_norm) %>% 
+  mutate(top50 = persinc %in% c("€ 1901 - € 2700", "€ 2701 - € 3700", "> € 3700")) %>% 
+  filter(group3) %>% 
+  filter(year(month)>=2018 & year(month)<=2021) %>% filter(month != ymd('2018-01-01')) %>% 
+  group_by(lwz_ever, top50, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + top50 + lwz_post + month_f:top50 + lwz_ever:top50 + lwz_post:top50, data = .) 
+```
+```{r}
+stargazer(
+  m_m_persinc_mean,
+  m_m_persinc_mean_g3_2018_2021,
+  keep = c('lwz_post', '^top50TRUE$'),
+  ci = T,
+  type = 'text'
+)
+```
+```{r}
+plot(m_m_persinc_mean)
+plot(m_m_persinc_mean_g3_2018_2021)
+```
+```{r DDD persinc combined table}
+stargazer(
+  m_m_persinc_bottom50_zinb1_1,
+  m_m_persinc_top50_zinb1_1,
+  m_m_persinc_mean,
+  m_m_persinc_mean_g3_2018_2021,
+  se=list(
+    m_m_persinc_bottom50_zinb1_1$cluster.se.count,
+    m_m_persinc_top50_zinb1_1$cluster.se.count,
+    NULL, NULL
+    ),
+  keep = c('lwz_post', '^top50TRUE$'),
+  single.row = T,
+  title = 'Above/below median personal income: Comparative DD and DDD',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Monthly count per subject', 'Monthly aggregate count'),
+  covariate.labels = c('$\\delta$', 'Above median', '$\\delta_1$', '$\\delta_4$'),
+  column.labels = c('Below median', 'Above median', 'Group 1', 'Group 4'),
+  notes = 'Other fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:dd_ddd_persinc_combined',
+  #out = path(tables_path, 'dd-ddd-persinc-combined.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+```{r cleanup}
+rm(m_m_persinc_top50_zinb1_1)
+rm(m_m_persinc_bottom50_zinb1_1)
+rm(m_m_persinc_mean)
+rm(m_m_persinc_mean_g3_2018_2021)
+```
+
+### 6.3 Household income
+Separated in top and bottom half of distribution
+```{r Figure trends hhinc}
+# Uncomment to export
+#tikz(path(figures_path, 'trend-hhinc.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+monthly_counts %>% 
+  drop_na(n) %>% 
+  mutate(top50 = ifelse(hhinc %in% c("€ 3301 - € 4900", "€ 4901 - € 6800", "> € 6800"), 'Above median', 'Below median')) %>% 
+  mutate(top50 = factor(top50, levels = c('Below median', 'Above median'))) %>% 
+  group_by(month, lwz_ever, top50) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  mutate(lwzever = ifelse(lwz_ever, 'Treated', 'Control')) %>% 
+  { (
+      ggplot(.) +
+        geom_step(aes(month, sum, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ top50) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(name='',
+                        breaks = c('Treated', 'Control', 'Intervention'),
+                        values = c('Treated' = 'solid', 'Control' = '22', 'Intervention' = 'dotted'))+
+        theme(axis.title.x = element_blank())
+    ) /
+    (
+      ggplot(.) +
+        geom_step(aes(month, mean, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ top50) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(values = c('Treated' = 'solid', 'Control' = '22')) +
+        theme(legend.position = 'none',
+              axis.title.x = element_blank())
+    )
+  }
+#dev.off()
+```
+
+#### Monthly
+```{r}
+if (file_test('-f', model_path('m_m_hhinc_top50_zinb1_1'))) {
+  load(model_path('m_m_hhinc_top50_zinb1_1'))
+} else {
+  tic()
+  m_m_hhinc_top50_zinb1_1 <- zeroinfl(n ~ token + month_f +
+                                   lwz_post_use |
+                                   token,
+                                 data = monthly_counts %>% drop_na(n) %>% 
+                                   filter(hhinc %in% c("€ 3301 - € 4900", "€ 4901 - € 6800", "> € 6800")),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_hhinc_top50_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_hhinc_top50_zinb1_1$AIC <- AIC(m_m_hhinc_top50_zinb1_1)
+  m_m_hhinc_top50_zinb1_1$BIC <- BIC(m_m_hhinc_top50_zinb1_1)
+  m_m_hhinc_top50_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_hhinc_top50_zinb1_1, cluster = ~ token)))
+  m_m_hhinc_top50_zinb1_1$cluster.se.count <- m_m_hhinc_top50_zinb1_1$cluster.se[grepl('^count_', names(m_m_hhinc_top50_zinb1_1$cluster.se))]
+  names(m_m_hhinc_top50_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_hhinc_top50_zinb1_1$SE.theta <- exp(m_m_hhinc_top50_zinb1_1$SE.logtheta)
+  save(m_m_hhinc_top50_zinb1_1, file = model_path('m_m_hhinc_top50_zinb1_1'))
+}
+if (file_test('-f', model_path('m_m_hhinc_bottom50_zinb1_1'))) {
+  load(model_path('m_m_hhinc_bottom50_zinb1_1'))
+} else {
+  tic()
+  m_m_hhinc_bottom50_zinb1_1 <- zeroinfl(n ~ token + month_f +
+                                   lwz_post_use |
+                                   token,
+                                 data = monthly_counts %>% drop_na(n) %>% 
+                                   filter(!hhinc %in% c("€ 3301 - € 4900", "€ 4901 - € 6800", "> € 6800")),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_hhinc_bottom50_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_hhinc_bottom50_zinb1_1$AIC <- AIC(m_m_hhinc_bottom50_zinb1_1)
+  m_m_hhinc_bottom50_zinb1_1$BIC <- BIC(m_m_hhinc_bottom50_zinb1_1)
+  m_m_hhinc_bottom50_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_hhinc_bottom50_zinb1_1, cluster = ~ token)))
+  m_m_hhinc_bottom50_zinb1_1$cluster.se.count <- m_m_hhinc_bottom50_zinb1_1$cluster.se[grepl('^count_', names(m_m_hhinc_bottom50_zinb1_1$cluster.se))]
+  names(m_m_hhinc_bottom50_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_hhinc_bottom50_zinb1_1$SE.theta <- exp(m_m_hhinc_bottom50_zinb1_1$SE.logtheta)
+  save(m_m_hhinc_bottom50_zinb1_1, file = model_path('m_m_hhinc_bottom50_zinb1_1'))
+}
+```
+```{r}
+stargazer(
+  m_m_hhinc_top50_zinb1_1,
+  m_m_hhinc_bottom50_zinb1_1,
+  se=list(
+    m_m_hhinc_top50_zinb1_1$cluster.se.count,
+    m_m_hhinc_bottom50_zinb1_1$cluster.se.count
+    ),
+  keep = c('lwz_post_use', '^topincTRUE$'),
+  ci = T,
+  type = 'text'
+)
+```
+
+#### Aggregated
+```{r}
+m_m_hhinc_mean <- 
+  monthly_counts %>%
+  drop_na(n_norm) %>% 
+  mutate(top50 = hhinc %in% c("€ 3301 - € 4900", "€ 4901 - € 6800", "> € 6800")) %>% 
+  group_by(lwz_ever, top50, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + top50 + lwz_post + month_f:top50 + lwz_ever:top50 + lwz_post:top50, data = .)
+m_m_hhinc_mean_g3_2018_2021 <- 
+  monthly_counts %>%
+  drop_na(n_norm) %>% 
+  mutate(top50 = hhinc %in% c("€ 3301 - € 4900", "€ 4901 - € 6800", "> € 6800")) %>% 
+  filter(group3) %>% 
+  filter(year(month)>=2018 & year(month)<=2021) %>% filter(month != ymd('2018-01-01')) %>% 
+  group_by(lwz_ever, top50, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + top50 + lwz_post + month_f:top50 + lwz_ever:top50 + lwz_post:top50, data = .) 
+```
+```{r}
+stargazer(
+  m_m_hhinc_mean,
+  m_m_hhinc_mean_g3_2018_2021,
+  keep = c('lwz_post', '^top50TRUE$'),
+  ci = T,
+  type = 'text'
+)
+```
+```{r}
+plot(m_m_hhinc_mean)
+plot(m_m_hhinc_mean_g3_2018_2021)
+```
+
+```{r DDD hhinc combined table}
+stargazer(
+  m_m_hhinc_bottom50_zinb1_1,
+  m_m_hhinc_top50_zinb1_1,
+  m_m_hhinc_mean,
+  m_m_hhinc_mean_g3_2018_2021,
+    se=list(
+    m_m_hhinc_bottom50_zinb1_1$cluster.se.count,
+    m_m_hhinc_top50_zinb1_1$cluster.se.count,
+    NULL, NULL
+    ),
+  keep = c('lwz_post', '^top50TRUE$'),
+  single.row = T,
+  title = 'Above/below median household income: Comparative DD and DDD',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Monthly count per subject', 'Monthly aggregate count'),
+  covariate.labels = c('$\\delta$', 'Above median', '$\\delta_1$', '$\\delta_4$'),
+  column.labels = c('Below median', 'Above median', 'Group 1', 'Group 4'),
+  notes = 'Other fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:dd_ddd_hhinc_combined',
+  #out = path(tables_path, 'dd-ddd-hhinc-combined.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+```{r cleanup}
+rm(m_m_hhinc_top50_zinb1_1)
+rm(m_m_hhinc_bottom50_zinb1_1)
+rm(m_m_hhinc_mean)
+rm(m_m_hhinc_mean_g3_2018_2021)
+```
+
+### 6.4 Education
+Separated in tertiary - other
+```{r Figure trends education}
+# Uncomment to export
+#tikz(path(figures_path, 'trend-education.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+monthly_counts %>% 
+  drop_na(n, education) %>% 
+  mutate(tertiary = ifelse(education == 'tertiary', 'Degree', 'No degree')) %>% 
+  mutate(tertiary = factor(tertiary, levels = c('No degree', 'Degree'))) %>% 
+  group_by(month, lwz_ever, tertiary) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  mutate(lwzever = ifelse(lwz_ever, 'Treated', 'Control')) %>% 
+  { (
+      ggplot(.) +
+        geom_step(aes(month, sum, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ tertiary) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(name='',
+                        breaks = c('Treated', 'Control', 'Intervention'),
+                        values = c('Treated' = 'solid', 'Control' = '22', 'Intervention' = 'dotted')) +
+        theme(axis.title.x = element_blank())
+    ) /
+    (
+      ggplot(.) +
+        geom_step(aes(month, mean, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ tertiary) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(values = c('Treated' = 'solid', 'Control' = '22')) +
+        theme(legend.position = 'none',
+              axis.title.x = element_blank())
+    )
+  }
+#dev.off()
+```
+
+#### Monthly
+```{r}
+if (file_test('-f', model_path('m_m_edu_tert_zinb1_1'))) {
+  load(model_path('m_m_edu_tert_zinb1_1'))
+} else {
+  tic()
+  m_m_edu_tert_zinb1_1 <- zeroinfl(n ~ token + month_f +
+                                   lwz_post_use |
+                                   token,
+                                 data = monthly_counts %>% drop_na(n) %>% 
+                                   filter(education == 'tertiary'),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_edu_tert_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_edu_tert_zinb1_1$AIC <- AIC(m_m_edu_tert_zinb1_1)
+  m_m_edu_tert_zinb1_1$BIC <- BIC(m_m_edu_tert_zinb1_1)
+  m_m_edu_tert_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_edu_tert_zinb1_1, cluster = ~ token)))
+  m_m_edu_tert_zinb1_1$cluster.se.count <- m_m_edu_tert_zinb1_1$cluster.se[grepl('^count_', names(m_m_edu_tert_zinb1_1$cluster.se))]
+  names(m_m_edu_tert_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_edu_tert_zinb1_1$SE.theta <- exp(m_m_edu_tert_zinb1_1$SE.logtheta)
+  save(m_m_edu_tert_zinb1_1, file = model_path('m_m_edu_tert_zinb1_1'))
+}
+if (file_test('-f', model_path('m_m_edu_ntert_zinb1_1'))) {
+  load(model_path('m_m_edu_ntert_zinb1_1'))
+} else {
+  tic()
+  m_m_edu_ntert_zinb1_1 <- zeroinfl(n ~ token + month_f +
+                                   lwz_post_use |
+                                   token + month_f,
+                                 data = monthly_counts %>% drop_na(n) %>% 
+                                   filter(education != 'tertiary'),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_edu_ntert_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_edu_ntert_zinb1_1$AIC <- AIC(m_m_edu_ntert_zinb1_1)
+  m_m_edu_ntert_zinb1_1$BIC <- BIC(m_m_edu_ntert_zinb1_1)
+  m_m_edu_ntert_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_edu_ntert_zinb1_1, cluster = ~ token)))
+  m_m_edu_ntert_zinb1_1$cluster.se.count <- m_m_edu_ntert_zinb1_1$cluster.se[grepl('^count_', names(m_m_edu_ntert_zinb1_1$cluster.se))]
+  names(m_m_edu_ntert_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_edu_ntert_zinb1_1$SE.theta <- exp(m_m_edu_ntert_zinb1_1$SE.logtheta)
+  save(m_m_edu_ntert_zinb1_1, file = model_path('m_m_edu_ntert_zinb1_1'))
+}
+```
+```{r}
+stargazer(
+  m_m_edu_tert_zinb1_1,
+  m_m_edu_ntert_zinb1_1,
+  se=list(
+    m_m_edu_tert_zinb1_1$cluster.se.count,
+    m_m_edu_ntert_zinb1_1$cluster.se.count
+    ),
+  keep = c('lwz_post_use'),
+  ci = T,
+  type = 'text'
+)
+```
+
+#### Aggregated
+```{r}
+m_m_education_mean <- 
+  monthly_counts %>%
+  drop_na(n_norm) %>% 
+  mutate(tertiary = education == 'tertiary') %>% 
+  group_by(lwz_ever, tertiary, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + tertiary + lwz_post + month_f:tertiary + lwz_ever:tertiary + lwz_post:tertiary, data = .)
+m_m_education_mean_g3_2018_2021 <- 
+  monthly_counts %>%
+  drop_na(n_norm) %>% 
+  mutate(tertiary = education == 'tertiary') %>% 
+  filter(group3) %>% 
+  filter(year(month)>=2018 & year(month)<=2021) %>% filter(month != ymd('2018-01-01')) %>% 
+  group_by(lwz_ever, tertiary, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + tertiary + lwz_post + month_f:tertiary + lwz_ever:tertiary + lwz_post:tertiary, data = .) 
+```
+```{r}
+stargazer(
+  m_m_education_mean,
+  m_m_education_mean_g3_2018_2021,
+  keep = c('lwz_post', '^tertiaryTRUE$'),
+  ci = T,
+  type = 'text'
+)
+```
+```{r}
+plot(m_m_education_mean)
+plot(m_m_education_mean_g3_2018_2021)
+```
+```{r DDD education combined table}
+stargazer(
+  m_m_edu_ntert_zinb1_1,
+  m_m_edu_tert_zinb1_1,
+  m_m_education_mean,
+  m_m_education_mean_g3_2018_2021,
+  se=list(
+    m_m_edu_ntert_zinb1_1$cluster.se.count,
+    m_m_edu_tert_zinb1_1$cluster.se.count,
+    NULL, NULL
+    ),
+  keep = c('lwz_post', '^tertiaryTRUE$'),
+  single.row = T,
+  title = 'University degree: Comparative DD and DDD',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Monthly count per subject', 'Monthly aggregate count'),
+  covariate.labels = c('$\\delta$', 'Degree', '$\\delta_1$', '$\\delta_4$'),
+  column.labels = c('No degree', 'Degree', 'Group 1', 'Group 4'),
+  notes = 'Other fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:dd_ddd_education_combined',
+  #out = path(tables_path, 'dd-ddd-education-combined.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+```{r cleanup}
+rm(m_m_edu_tert_zinb1_1)
+rm(m_m_edu_ntert_zinb1_1)
+rm(m_m_education_mean)
+rm(m_m_education_mean_g3_2018_2021)
+```
+
+### 6.5 Car access
+```{r Figure trends car access}
+# Uncomment to export
+#tikz(path(figures_path, 'trend-car.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+monthly_counts %>% 
+  drop_na(n, avb_car) %>% 
+  mutate(avb_car = ifelse(avb_car, 'Car', 'No car')) %>% 
+  mutate(avb_car = factor(avb_car, levels = c('No car', 'Car'))) %>% 
+  group_by(month, lwz_ever, avb_car) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  mutate(lwzever = ifelse(lwz_ever, 'Treated', 'Control')) %>% 
+  { (
+      ggplot(.) +
+        geom_step(aes(month, sum, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ avb_car) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(name='',
+                        breaks = c('Treated', 'Control', 'Intervention'),
+                        values = c('Treated' = 'solid', 'Control' = '22', 'Intervention' = 'dotted')) +
+        theme(axis.title.x = element_blank())
+    ) /
+    (
+      ggplot(.) +
+        geom_step(aes(month, mean, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ avb_car) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(values = c('Treated' = 'solid', 'Control' = '22')) +
+        theme(legend.position = 'none',
+              axis.title.x = element_blank())
+    )
+  }
+#dev.off()
+```
+
+#### Monthly
+```{r}
+if (file_test('-f', model_path('m_m_car_y_zinb1_1'))) {
+  load(model_path('m_m_car_y_zinb1_1'))
+} else {
+  tic()
+  m_m_car_y_zinb1_1 <- zeroinfl(n ~ token + month_f +
+                                   lwz_post_use |
+                                   token + month_f,
+                                 data = monthly_counts %>% drop_na(n) %>% 
+                                   filter(avb_car),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_car_y_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_car_y_zinb1_1$AIC <- AIC(m_m_car_y_zinb1_1)
+  m_m_car_y_zinb1_1$BIC <- BIC(m_m_car_y_zinb1_1)
+  m_m_car_y_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_car_y_zinb1_1, cluster = ~ token)))
+  m_m_car_y_zinb1_1$cluster.se.count <- m_m_car_y_zinb1_1$cluster.se[grepl('^count_', names(m_m_car_y_zinb1_1$cluster.se))]
+  names(m_m_car_y_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_car_y_zinb1_1$SE.theta <- exp(m_m_car_y_zinb1_1$SE.logtheta)
+  save(m_m_car_y_zinb1_1, file = model_path('m_m_car_y_zinb1_1'))
+}
+if (file_test('-f', model_path('m_m_car_n_zinb1_1'))) {
+  load(model_path('m_m_car_n_zinb1_1'))
+} else {
+  tic()
+  m_m_car_n_zinb1_1 <- zeroinfl(n ~ token + month_f +
+                                   lwz_post_use |
+                                   token + month_f,
+                                 data = monthly_counts %>% drop_na(n, avb_car) %>% 
+                                   filter(!avb_car),
+                                 dist = "negbin")
+  exec_time <- toc(quiet = T)
+  m_m_car_n_zinb1_1$duration <- exec_time$toc - exec_time$tic
+  rm(exec_time)
+  m_m_car_n_zinb1_1$AIC <- AIC(m_m_car_n_zinb1_1)
+  m_m_car_n_zinb1_1$BIC <- BIC(m_m_car_n_zinb1_1)
+  m_m_car_n_zinb1_1$cluster.se <- sqrt(diag(vcovCL(m_m_car_n_zinb1_1, cluster = ~ token)))
+  m_m_car_n_zinb1_1$cluster.se.count <- m_m_car_n_zinb1_1$cluster.se[grepl('^count_', names(m_m_car_n_zinb1_1$cluster.se))]
+  names(m_m_car_n_zinb1_1$cluster.se.count) %<>% str_replace('^count_','')
+  m_m_car_n_zinb1_1$SE.theta <- exp(m_m_car_n_zinb1_1$SE.logtheta)
+  save(m_m_car_n_zinb1_1, file = model_path('m_m_car_n_zinb1_1'))
+}
+```
+```{r}
+stargazer(
+  m_m_car_y_zinb1_1,
+  m_m_car_n_zinb1_1,
+  se=list(
+    m_m_car_y_zinb1_1$cluster.se.count,
+    m_m_car_n_zinb1_1$cluster.se.count
+    ),
+  keep = c('lwz_post_use'),
+  ci = T,
+  type = 'text'
+)
+```
+
+#### Aggregated
+```{r}
+m_m_car_mean <- 
+  monthly_counts %>%
+  drop_na(n_norm, avb_car) %>% 
+  group_by(lwz_ever, avb_car, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + avb_car + lwz_post + month_f:avb_car + lwz_ever:avb_car + lwz_post:avb_car, data = .)
+m_m_car_mean_g3_2018_2021 <- 
+  monthly_counts %>%
+  drop_na(n_norm, avb_car) %>% 
+  filter(group3) %>% 
+  filter(year(month)>=2018 & year(month)<=2021) %>% filter(month != ymd('2018-01-01')) %>% 
+  group_by(lwz_ever, avb_car, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + avb_car + lwz_post + month_f:avb_car + lwz_ever:avb_car + lwz_post:avb_car, data = .) 
+```
+```{r}
+stargazer(
+  m_m_car_mean,
+  m_m_car_mean_g3_2018_2021,
+  keep = c('lwz_post', '^avb_carTRUE$'),
+  ci = T,
+  type = 'text'
+)
+```
+```{r}
+plot(m_m_car_mean)
+plot(m_m_car_mean_g3_2018_2021)
+```
+```{r DDD car access combined table}
+stargazer(
+  m_m_car_n_zinb1_1,
+  m_m_car_y_zinb1_1,
+  m_m_car_mean,
+  m_m_car_mean_g3_2018_2021,
+  se=list(
+    m_m_car_n_zinb1_1$cluster.se.count,
+    m_m_car_y_zinb1_1$cluster.se.count,
+    NULL, NULL
+    ),
+  keep = c('lwz_post', '^avb_carTRUE$'),
+  single.row = T,
+  title = 'Access to car: Comparative DD and DDD',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Monthly count per subject', 'Monthly aggregate count'),
+  covariate.labels = c('$\\delta$', 'Car available', '$\\delta_1$', '$\\delta_4$'),
+  column.labels = c('No car available', 'Car available', 'Group 1', 'Group 4'),
+  notes = 'Other fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:dd_ddd_car_combined',
+  #out = path(tables_path, 'dd-ddd-car-combined.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+```{r cleanup}
+rm(m_m_car_y_zinb1_1)
+rm(m_m_car_n_zinb1_1)
+rm(m_m_car_mean)
+rm(m_m_car_mean_g3_2018_2021)
+```
+
+### 6.6 Employment
+```{r Figure employment trends}
+# Uncomment to export
+#tikz(path(figures_path, 'trend-employment.tex'),
+#     width = fw(1), height = fh(1),
+#     pointsize = 8)
+monthly_counts %>% 
+  drop_na(n, worksituation) %>% 
+  filter(worksituation %in% c("part-time", "full-time", "self-employed")) %>% 
+  group_by(month, lwz_ever, worksituation) %>% 
+  summarise(mean = mean(n), sum = sum(n)) %>% 
+  mutate(lwzever = ifelse(lwz_ever, 'Treated', 'Control')) %>% 
+  { (
+      ggplot(.) +
+        geom_step(aes(month, sum, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ worksituation) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(name='',
+                        breaks = c('Treated', 'Control', 'Intervention'),
+                        values = c('Treated' = 'solid', 'Control' = '22', 'Intervention' = 'dotted')) +
+        theme(axis.title.x = element_blank())
+    ) /
+    (
+      ggplot(.) +
+        geom_step(aes(month, mean, linetype = lwzever)) +
+        geom_vline(xintercept = as.POSIXct(floor_date(lwz_open, 'month')), linetype = 'dotted') +
+        facet_grid( ~ worksituation) +
+        theme_pubr() +
+        labs(linetype = '', x = '') +
+        scale_linetype_manual(values = c('Treated' = 'solid', 'Control' = '22')) +
+        theme(legend.position = 'none',
+              axis.title.x = element_blank())
+    )
+  }
+#dev.off()
+```
+Part-time does not fulfill parallel trends assumption, no point
+
+### 6.7 Age
+No meaningful groups can be created, only aggregated analysis
+
+#### Aggregated
+```{r}
+m_m_age_mean <- 
+  monthly_counts %>%
+  drop_na(n_norm, age) %>% 
+  group_by(lwz_ever, age, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + age + lwz_post + month_f:age + lwz_ever:age + lwz_post:age, data = .)
+m_m_age_mean_g3_2018_2021 <- 
+  monthly_counts %>%
+  drop_na(n_norm, age) %>% 
+  filter(group3) %>% 
+  filter(year(month)>=2018 & year(month)<=2021) %>% filter(month != ymd('2018-01-01')) %>% 
+  group_by(lwz_ever, age, month_f, month) %>% 
+  summarise(sum = sum(n_norm), mean = mean(n_norm)) %>% 
+  mutate(lwz_post = (month >= floor_date(lwz_open, 'month')) & lwz_ever) %>% 
+  lm(log(mean+1) ~ lwz_ever + month_f + age + lwz_post + month_f:age + lwz_ever:age + lwz_post:age, data = .) 
+```
+```{r DDD age combined table}
+stargazer(
+  m_m_age_mean,
+  m_m_age_mean_g3_2018_2021,
+  keep = c('lwz_post', '^age$'),
+  title = 'Age: DDD',
+  style = 'apsr',
+  ci = F,
+  dep.var.labels = c('Monthly aggregate count'),
+  covariate.labels = c('Age', '$\\delta_1$', '$\\delta_4$'),
+  column.labels = c('Group 1', 'Group 4'),
+  notes = 'Other fixed effects covariates omitted for legibility.',
+  notes.append = T,
+  single.row = T,
+  
+  # Uncomment to export
+  #type = 'latex',
+  #font.size = 'scriptsize',
+  #label = 'tab:dd_ddd_age_combined',
+  #out = path(tables_path, 'dd-ddd-age-combined.tex')
+  
+  # Uncomment to display
+  type = 'text'
+)
+```
+```{r}
+plot(m_m_age_mean)
+plot(m_m_age_mean_g3_2018_2021)
+```
+```{r cleanup}
+rm(m_m_age_mean)
+rm(m_m_age_mean_g3_2018_2021)
+```

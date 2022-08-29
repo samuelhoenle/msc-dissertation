@@ -1,0 +1,13 @@
+# IDE-specific files
+.idea
+
+# Paths to external sources
+paths
+
+# R project data
+.Rproj.user
+.RData
+.Rhistory
+
+# Python cache
+__pycache__
